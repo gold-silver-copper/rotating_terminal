@@ -1,5 +1,5 @@
 [package]
-name = "soft-ratatui-bevy-cube"
+name = "soft-ratatui-bevy-cube-colors"
 edition = "2024"
 version.workspace = true
 authors.workspace = true
@@ -10,5 +10,8 @@ publish.workspace = true
 [dependencies]
 bevy.workspace = true
 ratatui.workspace = true
-soft_ratatui = { path = "../.." }
+itertools.workspace = true
+palette.workspace = true
+color-eyre.workspace = true
+soft_ratatui = { path = "../..", features = ["bdf-parser"] }
 embedded-graphics-unicodefonts.workspace = true

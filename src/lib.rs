@@ -3,7 +3,7 @@ use std::f32::consts::FRAC_PI_6;
 use bevy::{
     asset::{AssetPlugin, RenderAssetUsages},
     gltf::GltfMaterialName,
-    image::{CompressedImageFormats, ImageSampler, ImageType},
+    image::{CompressedImageFormats, ImagePlugin, ImageSampler, ImageType},
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
     scene::SceneInstanceReady,
@@ -19,8 +19,6 @@ use soft_ratatui::{
     EmbeddedGraphics, SoftBackend,
     embedded_graphics_unicodefonts::mono_4x6_atlas,
 };
-use tachyonfx::{CellFilter, Effect, EffectRenderer, EffectTimer, Interpolation, SimpleRng, fx};
-
 const TERMINAL_ASSET_PATH: &str = "vintage_terminal/scene.gltf";
 const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.18;
 const CAMERA_ORBIT_RADIUS: f32 = 8.8;
@@ -40,7 +38,6 @@ const SCREEN_ATLAS_X: u32 = 10;
 const SCREEN_ATLAS_Y: u32 = 463;
 const SCREEN_ATLAS_WIDTH: u32 = 157;
 const SCREEN_ATLAS_HEIGHT: u32 = 233;
-const TERMINAL_TITLE_COLOR: TuiColor = TuiColor::Rgb(150, 255, 150);
 const TERMINAL_BODY_COLOR: TuiColor = TuiColor::Rgb(92, 170, 92);
 const TERMINAL_BORDER_COLOR: TuiColor = TuiColor::Rgb(70, 120, 70);
 
@@ -63,15 +60,29 @@ struct ZoomCamera {
 #[derive(Resource)]
 struct TerminalScreenTexture(Handle<Image>);
 
+#[derive(Resource)]
+struct TerminalScreenMaterial(Handle<StandardMaterial>);
+
 struct TerminalScreenRenderer {
     terminal: Terminal<SoftBackend<EmbeddedGraphics>>,
-    title_effect: Effect,
-    next_seed: u32,
-    elapsed: std::time::Duration,
-    frame_index: u64,
+    demo_app: TerminalDemoApp,
     atlas_width: u32,
     atlas_height: u32,
     atlas_template: Vec<u8>,
+}
+
+struct TerminalDemoApp {
+    frame_count: u64,
+}
+
+impl TerminalDemoApp {
+    fn new() -> Self {
+        Self { frame_count: 0 }
+    }
+
+    fn on_tick(&mut self) {
+        self.frame_count = self.frame_count.wrapping_add(1);
+    }
 }
 
 pub fn run_rotating_terminal() {
@@ -85,12 +96,18 @@ pub fn run_stationary_terminal() {
 fn app(camera_mode: CameraMode) -> App {
     let mut app = App::new();
     app.insert_resource(camera_mode)
-        .add_plugins(DefaultPlugins.set(AssetPlugin {
-            file_path: ".".to_string(),
-            ..default()
-        }))
+        .insert_resource(Time::<Fixed>::from_hz(30.0))
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: ".".to_string(),
+                    ..default()
+                })
+                .set(ImagePlugin::default_nearest()),
+        )
         .add_systems(Startup, setup)
-        .add_systems(Update, (orbit_camera, zoom_camera, animate_terminal_screen));
+        .add_systems(Update, (orbit_camera, zoom_camera))
+        .add_systems(FixedUpdate, animate_terminal_screen);
     app
 }
 
@@ -107,7 +124,20 @@ fn setup(world: &mut World) {
         let mut images = world.resource_mut::<Assets<Image>>();
         images.add(initial_image)
     };
-    world.insert_resource(TerminalScreenTexture(image_handle));
+    world.insert_resource(TerminalScreenTexture(image_handle.clone()));
+    let screen_material_handle = {
+        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(image_handle.clone()),
+            emissive_texture: Some(image_handle.clone()),
+            emissive: LinearRgba::rgb(1.4, 1.4, 1.4),
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        })
+    };
+    world.insert_resource(TerminalScreenMaterial(screen_material_handle));
     world.insert_non_send_resource(renderer);
 
     let terminal_scene = {
@@ -194,14 +224,24 @@ fn zoom_camera(time: Res<Time>, mut query: Query<(&mut Transform, &mut ZoomCamer
 
 fn animate_terminal_screen(
     time: Res<Time>,
-    terminal_screen_texture: Res<TerminalScreenTexture>,
+    mut terminal_screen_texture: ResMut<TerminalScreenTexture>,
+    terminal_screen_material: Res<TerminalScreenMaterial>,
     mut terminal_screen_renderer: NonSendMut<TerminalScreenRenderer>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let updated_image = terminal_screen_renderer.render_to_image(time.delta());
-    if let Some(image) = images.get_mut(&terminal_screen_texture.0) {
-        *image = updated_image;
-    }
+    let new_texture_handle = images.add(updated_image);
+    let previous_texture_handle =
+        std::mem::replace(&mut terminal_screen_texture.0, new_texture_handle.clone());
+
+    let Some(material) = materials.get_mut(&terminal_screen_material.0) else {
+        return;
+    };
+    material.base_color_texture = Some(new_texture_handle.clone());
+    material.emissive_texture = Some(new_texture_handle);
+
+    let _ = images.remove(previous_texture_handle.id());
 }
 
 fn configure_terminal_scene_when_ready(
@@ -210,8 +250,7 @@ fn configure_terminal_scene_when_ready(
     children: Query<&Children>,
     names: Query<&Name>,
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
-    terminal_screen_texture: Res<TerminalScreenTexture>,
-    mut asset_materials: ResMut<Assets<StandardMaterial>>,
+    terminal_screen_material: Res<TerminalScreenMaterial>,
 ) {
     for descendant in children.iter_descendants(scene_ready.entity) {
         if let Ok(name) = names.get(descendant) {
@@ -223,26 +262,15 @@ fn configure_terminal_scene_when_ready(
             }
         }
 
-        let Ok((material_handle, material_name)) = mesh_materials.get(descendant) else {
+        let Ok((_material_handle, material_name)) = mesh_materials.get(descendant) else {
             continue;
         };
         if material_name.0.as_str() != SCREEN_MATERIAL_NAME {
             continue;
         }
-        let Some(material) = asset_materials.get_mut(material_handle.id()) else {
-            continue;
-        };
-
-        let mut animated_material = material.clone();
-        animated_material.base_color = Color::WHITE;
-        animated_material.base_color_texture = Some(terminal_screen_texture.0.clone());
-        animated_material.emissive_texture = Some(terminal_screen_texture.0.clone());
-        animated_material.emissive = LinearRgba::rgb(1.4, 1.4, 1.4);
-        animated_material.unlit = true;
-        animated_material.cull_mode = None;
         commands
             .entity(descendant)
-            .insert(MeshMaterial3d(asset_materials.add(animated_material)));
+            .insert(MeshMaterial3d(terminal_screen_material.0.clone()));
     }
 }
 
@@ -262,10 +290,7 @@ fn build_terminal_screen_renderer() -> TerminalScreenRenderer {
 
     TerminalScreenRenderer {
         terminal,
-        title_effect: make_title_dissolve_effect(7),
-        next_seed: 8,
-        elapsed: std::time::Duration::ZERO,
-        frame_index: 0,
+        demo_app: TerminalDemoApp::new(),
         atlas_width,
         atlas_height,
         atlas_template: atlas_template
@@ -274,17 +299,37 @@ fn build_terminal_screen_renderer() -> TerminalScreenRenderer {
     }
 }
 
-fn draw_terminal_screen(frame: &mut Frame, elapsed: std::time::Duration, frame_index: u64) {
+fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp) {
     let area = frame.area();
+    let frame_index = app.frame_count;
+    let pulse = (frame_index / 5).is_multiple_of(2);
+    let background = if pulse {
+        TuiColor::Rgb(5, 20, 5)
+    } else {
+        TuiColor::Black
+    };
+    let title_color = if pulse {
+        TuiColor::Rgb(170, 255, 170)
+    } else {
+        TuiColor::Rgb(70, 220, 70)
+    };
+    let body_color = if pulse {
+        TuiColor::Rgb(110, 255, 110)
+    } else {
+        TERMINAL_BODY_COLOR
+    };
+
     let block = Block::new()
         .borders(Borders::ALL)
-        .border_style(TuiStyle::default().fg(TERMINAL_BORDER_COLOR));
+        .style(TuiStyle::default().bg(background))
+        .border_style(TuiStyle::default().fg(TERMINAL_BORDER_COLOR).bg(background));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(1),
             Constraint::Length(2),
@@ -292,54 +337,61 @@ fn draw_terminal_screen(frame: &mut Frame, elapsed: std::time::Duration, frame_i
         .split(inner);
 
     let spinner = ['|', '/', '-', '\\'][(frame_index as usize) % 4];
-    let pulse_word = if (elapsed.as_millis() / 300).is_multiple_of(2) {
+    let pulse_word = if (frame_index / 8).is_multiple_of(2) {
         "ONLINE"
     } else {
         "SYNCING"
     };
-
-    frame.render_widget(
-        Paragraph::new("TERMINAL\nCOLLECTIVE")
-            .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(TERMINAL_TITLE_COLOR)),
-        rows[0],
+    let sweep = (frame_index as usize) % 12;
+    let status_bar: String = (0..12)
+        .map(|idx| if idx <= sweep { '█' } else { '·' })
+        .collect();
+    let scroll_offset = (frame_index as usize) % 20;
+    let tape = ">>>LIVE>>>SIGNAL>>>";
+    let tape_line = format!(
+        "{}{}",
+        &tape[scroll_offset..],
+        &tape[..scroll_offset]
     );
+
     frame.render_widget(
         Paragraph::new(format!("{spinner} {pulse_word}"))
             .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(TERMINAL_BODY_COLOR)),
+            .style(TuiStyle::default().fg(body_color).bg(background)),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new("TERMINAL\nCOLLECTIVE")
+            .alignment(Alignment::Center)
+            .style(TuiStyle::default().fg(title_color).bg(background)),
         rows[1],
     );
     frame.render_widget(
-        Paragraph::new("SOFT RATATUI\nSIGNAL LIVE")
+        Paragraph::new(status_bar)
             .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(TERMINAL_BODY_COLOR))
+            .style(TuiStyle::default().fg(body_color).bg(background))
             .wrap(Wrap { trim: false }),
         rows[2],
+    );
+    frame.render_widget(
+        Paragraph::new(format!("{}\n{}", &tape_line[..12], &tape_line[4..16]))
+            .alignment(Alignment::Center)
+            .style(TuiStyle::default().fg(body_color).bg(background))
+            .wrap(Wrap { trim: false }),
+        rows[3],
     );
 }
 
 impl TerminalScreenRenderer {
-    fn render_to_image(&mut self, delta: std::time::Duration) -> Image {
-        self.elapsed += delta;
-        self.frame_index = self.frame_index.wrapping_add(1);
-
+    fn render_to_image(&mut self, _delta: std::time::Duration) -> Image {
+        self.demo_app.on_tick();
         let terminal = &mut self.terminal;
-        let title_effect = &mut self.title_effect;
-        let elapsed = self.elapsed;
-        let frame_index = self.frame_index;
+        let demo_app = &mut self.demo_app;
         terminal
             .draw(|frame| {
-                let area = frame.area();
-                draw_terminal_screen(frame, elapsed, frame_index);
-                frame.render_effect(title_effect, area, delta.into());
+                draw_terminal_screen(frame, demo_app);
             })
             .expect("soft_ratatui screen should render");
-
-        if !self.title_effect.running() {
-            self.title_effect = make_title_dissolve_effect(self.next_seed);
-            self.next_seed = self.next_seed.wrapping_add(1);
-        }
 
         let backend = terminal.backend();
         let screen_width = backend.get_pixmap_width() as u32;
@@ -455,13 +507,4 @@ fn rotate_rgba_90_ccw(width: u32, height: u32, source: &[u8]) -> Vec<u8> {
         }
     }
     rotated
-}
-
-fn make_title_dissolve_effect(seed: u32) -> Effect {
-    fx::dissolve(EffectTimer::from_ms(1100, Interpolation::SineInOut))
-        .with_rng(SimpleRng::new(seed))
-        .with_filter(CellFilter::AllOf(vec![
-            CellFilter::Text,
-            CellFilter::FgColor(TERMINAL_TITLE_COLOR),
-        ]))
 }
