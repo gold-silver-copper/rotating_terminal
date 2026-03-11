@@ -1,0 +1,10 @@
+[package]
+name = "rotating_terminal"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = "0.18.1"
+ratatui = "0.30.0"
+soft_ratatui = "0.2.0"
+tachyonfx = "0.25.0"
