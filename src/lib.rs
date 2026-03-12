@@ -35,8 +35,8 @@ use soft_ratatui::{
 };
 const TERMINAL_ASSET_PATH: &str = "vintage_terminal/scene.gltf";
 const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.12;
-const CAMERA_ORBIT_RADIUS: f32 = 8.8;
-const CAMERA_HEIGHT: f32 = 3.8;
+const CAMERA_ORBIT_RADIUS: f32 = 6.0;
+const CAMERA_HEIGHT: f32 = 1.0;
 const CAMERA_LOOK_AT: Vec3 = Vec3::new(0.0, -0.2, 0.0);
 const ZOOM_CAMERA_START: Vec3 = Vec3::new(-0.35, 0.55, 8.4);
 const ZOOM_CAMERA_END: Vec3 = Vec3::new(-0.6, 0.0, 2.5);
@@ -55,7 +55,10 @@ const SCREEN_ATLAS_Y: u32 = 463;
 const SCREEN_ATLAS_WIDTH: u32 = 157;
 const SCREEN_ATLAS_HEIGHT: u32 = 233;
 const TERMINAL_BORDER_COLOR: TuiColor = TuiColor::Rgb(70, 120, 70);
-const BLOOM_INTENSITY: f32 = 0.18;
+const BLOOM_INTENSITY: f32 = 0.06;
+const TERMINAL_SURFACE_MIN_ROUGHNESS: f32 = 0.97;
+const TERMINAL_SURFACE_MAX_METALLIC: f32 = 0.0;
+const TERMINAL_SURFACE_MAX_REFLECTANCE: f32 = 0.01;
 const TUI_UPDATE_FPS: f64 = 15.0;
 const LIVE_FIXED_FPS: f64 = 30.0;
 const EXPORT_ROTATION_WIDTH: u32 = 1920;
@@ -66,10 +69,11 @@ const EXPORT_FPS: f64 = 60.0;
 const EXPORT_ROTATION_FRAMES: u32 = 420;
 const EXPORT_ZOOM_FRAMES: u32 = ((ZOOM_DURATION_SECONDS * 2.0) as u32) * EXPORT_FPS as u32;
 const INTERMISSION_LOOP_SECONDS: f32 = 6.4;
+const INTERMISSION_SPINNER_STEP_UPDATES: u64 = 8;
 const EXPORT_INTERMISSION_FRAMES: u32 = (INTERMISSION_LOOP_SECONDS * EXPORT_FPS as f32) as u32;
 const EXPORT_SHUTDOWN_FRAMES: u32 = ((SHUTDOWN_DURATION_SECONDS * 2.0) * EXPORT_FPS as f32) as u32;
-const EXPORT_WARMUP_FRAMES: u32 = 600;
-const INTERMISSION_CAMERA_BASE: Vec3 = Vec3::new(0.28, 1.9, 8.7);
+const EXPORT_WARMUP_FRAMES: u32 = 60;
+const INTERMISSION_CAMERA_BASE: Vec3 = Vec3::new(0.19, CAMERA_HEIGHT, CAMERA_ORBIT_RADIUS - 0.003);
 const INTERMISSION_CAMERA_LOOK_AT: Vec3 = Vec3::new(0.02, -0.2, 0.08);
 const SHUTDOWN_CAMERA_START: Vec3 = Vec3::new(-0.12, 1.25, 7.1);
 const SHUTDOWN_CAMERA_END: Vec3 = Vec3::new(-0.25, 1.6, 8.9);
@@ -317,8 +321,7 @@ fn setup(world: &mut World) {
         materials.add(StandardMaterial {
             base_color: Color::WHITE,
             base_color_texture: Some(image_handle.clone()),
-            emissive_texture: Some(image_handle.clone()),
-            emissive: LinearRgba::rgb(1.4, 1.4, 1.4),
+            emissive: LinearRgba::BLACK,
             unlit: true,
             cull_mode: None,
             ..default()
@@ -705,10 +708,14 @@ fn animate_terminal_screen_with_delta(
     if cadence.accumulator_secs + f32::EPSILON < frame_interval {
         return;
     }
-    cadence.accumulator_secs -= frame_interval;
+    let mut elapsed_since_last_draw = 0.0;
+    while cadence.accumulator_secs + f32::EPSILON >= frame_interval {
+        cadence.accumulator_secs -= frame_interval;
+        elapsed_since_last_draw += frame_interval;
+    }
 
-    let updated_image =
-        terminal_screen_renderer.render_to_image(std::time::Duration::from_secs_f32(delta_secs));
+    let updated_image = terminal_screen_renderer
+        .render_to_image(std::time::Duration::from_secs_f32(elapsed_since_last_draw));
     let new_texture_handle = images.add(updated_image);
     let previous_texture_handle =
         std::mem::replace(&mut terminal_screen_texture.0, new_texture_handle.clone());
@@ -728,6 +735,7 @@ fn configure_terminal_scene_when_ready(
     children: Query<&Children>,
     names: Query<&Name>,
     mesh_materials: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     terminal_screen_material: Res<TerminalScreenMaterial>,
 ) {
     for descendant in children.iter_descendants(scene_ready.entity) {
@@ -744,6 +752,15 @@ fn configure_terminal_scene_when_ready(
             continue;
         };
         if material_name.0.as_str() != SCREEN_MATERIAL_NAME {
+            if let Some(material) = materials.get_mut(&_material_handle.0) {
+                material.metallic_roughness_texture = None;
+                material.emissive_texture = None;
+                material.emissive = LinearRgba::BLACK;
+                material.perceptual_roughness =
+                    material.perceptual_roughness.max(TERMINAL_SURFACE_MIN_ROUGHNESS);
+                material.metallic = material.metallic.min(TERMINAL_SURFACE_MAX_METALLIC);
+                material.reflectance = material.reflectance.min(TERMINAL_SURFACE_MAX_REFLECTANCE);
+            }
             continue;
         }
         commands
@@ -783,13 +800,17 @@ fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp, scene_mode
     let frame_index = app.frame_count;
     let background = TuiColor::Black;
     let title_color = TuiColor::Rgb(150, 255, 150);
+    let horizontal_margin = match scene_mode {
+        SceneMode::ShutdownOutro | SceneMode::ShutdownLoop => 0,
+        _ => 1,
+    };
 
     frame.render_widget(
         Block::new().style(TuiStyle::default().bg(background)),
         area,
     );
 
-    let frame_area = area.inner(Margin::new(1, 0));
+    let frame_area = area.inner(Margin::new(horizontal_margin, 0));
     let block = Block::new()
         .borders(Borders::ALL)
         .style(TuiStyle::default().bg(background))
@@ -863,8 +884,10 @@ fn draw_intermission_screen(
         .split(inner);
     let loop_updates = (INTERMISSION_LOOP_SECONDS * TUI_UPDATE_FPS as f32) as u64;
     let phase_updates = if loop_updates == 0 { 0 } else { frame_index % loop_updates };
-    let spinner = ['.', 'o', 'O', 'o'][((phase_updates * 4) / loop_updates.max(1)) as usize % 4];
-    let phrase = match ((phase_updates * 4) / loop_updates.max(1)) % 4 {
+    let spinner = ['.', 'o', 'O', 'o']
+        [((frame_index / INTERMISSION_SPINNER_STEP_UPDATES.max(1)) % 4) as usize];
+    let phrase_phase = (phase_updates * 4) / loop_updates.max(1);
+    let phrase = match phrase_phase % 4 {
         0 => "RECESS\nSTANDBY",
         1 => "HOLD\nPAUSE",
         2 => "RECESS\nHOLD",
@@ -909,6 +932,7 @@ fn draw_shutdown_outro_screen(
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Length(2)])
         .split(inner);
+    let flash_on = ((app.elapsed_secs * 2.0) as u64).is_multiple_of(2);
 
     frame.render_widget(
         Paragraph::new(title_text())
@@ -920,30 +944,51 @@ fn draw_shutdown_outro_screen(
 
     if progress < 0.34 {
         frame.render_widget(
-            Paragraph::new("THANKS FOR WATCHING")
+            Paragraph::new("THANKS FOR\nWATCHING")
                 .alignment(Alignment::Center)
-                .style(TuiStyle::default()
-                    .fg(TuiColor::Rgb(215, 225, 180))
-                    .bg(TuiColor::Black))
+                .style(
+                    TuiStyle::default()
+                        .fg(if flash_on {
+                            TuiColor::Rgb(215, 225, 180)
+                        } else {
+                            TuiColor::Rgb(110, 118, 94)
+                        })
+                        .bg(TuiColor::Black),
+                )
                 .wrap(Wrap { trim: false }),
             rows[2],
         );
     } else if progress < 0.68 {
         frame.render_widget(
-            Paragraph::new("UNMOUNT SHOWFS")
+            Paragraph::new("GOODBYE\nSEE YOU SOON")
                 .alignment(Alignment::Center)
-                .style(TuiStyle::default().fg(TuiColor::Rgb(108, 205, 108)).bg(TuiColor::Black))
+                .style(
+                    TuiStyle::default()
+                        .fg(if flash_on {
+                            TuiColor::Rgb(108, 205, 108)
+                        } else {
+                            TuiColor::Rgb(52, 98, 52)
+                        })
+                        .bg(TuiColor::Black),
+                )
                 .wrap(Wrap { trim: false }),
-            rows[1],
+            rows[2],
         );
     } else {
-        let cursor = if ((app.elapsed_secs * 2.0) as u64).is_multiple_of(2) { "_" } else { " " };
         frame.render_widget(
-            Paragraph::new(format!("POWER DOWN{cursor}"))
+            Paragraph::new("HAVE A\nNICE DAY")
                 .alignment(Alignment::Center)
-                .style(TuiStyle::default().fg(TuiColor::Rgb(62, 115, 62)).bg(TuiColor::Black))
+                .style(
+                    TuiStyle::default()
+                        .fg(if flash_on {
+                            TuiColor::Rgb(82, 145, 82)
+                        } else {
+                            TuiColor::Rgb(36, 64, 36)
+                        })
+                        .bg(TuiColor::Black),
+                )
                 .wrap(Wrap { trim: false }),
-            rows[1],
+            rows[2],
         );
     }
 }
