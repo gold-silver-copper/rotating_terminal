@@ -4,15 +4,17 @@ Bevy 0.18.1 project that loads a `vintage_terminal` 3D model and drives its scre
 
 The project currently includes:
 
-- an orbiting-camera scene
-- a stationary-terminal scene with a slow zoom-in camera
-- an offscreen export path for rendering either a full rotation or a zoom-in to an image sequence
-- shell scripts that turn exported frames into high-quality MP4 files with `ffmpeg`
+- an orbiting hero shot
+- a stationary terminal shot with a looping zoom in/out camera
+- an intermission variant
+- a shutdown/outro variant
+- offscreen exporters for all current loopable shots
+- shell scripts that render PNG sequences and encode high-quality looping MP4s with `ffmpeg`
 
 ## Requirements
 
 - Rust and Cargo
-- `ffmpeg` for video export via the shell script
+- `ffmpeg` for video export
 
 ## Install
 
@@ -20,13 +22,11 @@ The project currently includes:
 cargo check --bins
 ```
 
-This validates all binaries in the project.
-
-## Binaries
+## Interactive Binaries
 
 ### `rotating_terminal`
 
-Runs the main interactive scene with the camera orbiting around the terminal.
+Orbiting camera around the terminal.
 
 ```bash
 cargo run --bin rotating_terminal
@@ -34,21 +34,33 @@ cargo run --bin rotating_terminal
 
 ### `stationary_terminal`
 
-Runs a stationary-terminal scene where the camera slowly zooms toward the screen.
+Stationary terminal with a looping zoom in/out camera move.
 
 ```bash
 cargo run --bin stationary_terminal
 ```
 
+### `intermission`
+
+Intermission/standby scene variant.
+
+```bash
+cargo run --bin intermission
+```
+
+### `shutdown_outro`
+
+Shutdown/outro scene variant.
+
+```bash
+cargo run --bin shutdown_outro
+```
+
+## Export Binaries
+
+All exports render numbered PNGs with `bevy_image_export`.
+
 ### `export_rotation`
-
-Renders one full orbit to a numbered PNG sequence using `bevy_image_export`.
-
-Default output directory:
-
-- `renders/rotation_frames`
-
-Usage:
 
 ```bash
 cargo run --release --bin export_rotation
@@ -57,25 +69,17 @@ cargo run --release --bin export_rotation
 Custom output directory:
 
 ```bash
-cargo run --release --bin export_rotation -- /absolute/or/relative/output_dir
+cargo run --release --bin export_rotation -- /path/to/output_dir
 ```
 
-Export settings currently baked into the app:
+Settings:
 
-- resolution: `1920x1920`
+- resolution: `1920x1080`
 - frame rate: `60 fps`
 - frame count: `420`
-- motion: exactly one full orbit
+- motion: one seamless full orbit loop
 
 ### `export_zoom`
-
-Renders the zoom-in camera move to a numbered PNG sequence using `bevy_image_export`.
-
-Default output directory:
-
-- `renders/zoom_frames`
-
-Usage:
 
 ```bash
 cargo run --release --bin export_zoom
@@ -84,89 +88,125 @@ cargo run --release --bin export_zoom
 Custom output directory:
 
 ```bash
-cargo run --release --bin export_zoom -- /absolute/or/relative/output_dir
+cargo run --release --bin export_zoom -- /path/to/output_dir
 ```
 
-Export settings currently baked into the app:
+Settings:
 
-- resolution: `1920x1920`
+- resolution: `1920x1080`
 - frame rate: `60 fps`
-- frame count: `1680`
-- motion: one full scripted zoom-in pass
+- frame count: `3360`
+- motion: seamless zoom in/out ping-pong loop
 
-## Scripts
-
-### `scripts/render_rotation_loop.sh`
-
-Runs the export binary, then encodes the resulting image sequence into an MP4 with `ffmpeg`.
-
-Default usage:
+### `export_intermission`
 
 ```bash
-scripts/render_rotation_loop.sh
+cargo run --release --bin export_intermission
 ```
+
+Custom output directory:
+
+```bash
+cargo run --release --bin export_intermission -- /path/to/output_dir
+```
+
+Settings:
+
+- resolution: `1920x1080`
+- frame rate: `60 fps`
+- motion: seamless intermission loop
+
+### `export_shutdown`
+
+```bash
+cargo run --release --bin export_shutdown
+```
+
+Custom output directory:
+
+```bash
+cargo run --release --bin export_shutdown -- /path/to/output_dir
+```
+
+Settings:
+
+- resolution: `1920x1080`
+- frame rate: `60 fps`
+- motion: seamless outro loop based on the shutdown camera/text cycle
+
+## Render Scripts
+
+The scripts below are executable and can be run directly with `./scripts/...`.
+
+### `./scripts/render_rotation_loop.sh`
 
 Default outputs:
 
 - frames: `renders/rotation_frames`
 - video: `renders/rotating_terminal_loop.mp4`
 
-Custom paths:
+Usage:
 
 ```bash
-scripts/render_rotation_loop.sh /path/to/frames /path/to/output.mp4
+./scripts/render_rotation_loop.sh
+./scripts/render_rotation_loop.sh /path/to/frames /path/to/output.mp4
 ```
 
-Optional environment variable:
-
-```bash
-FPS=30 scripts/render_rotation_loop.sh
-```
-
-What the script does:
-
-1. Deletes the existing frame directory.
-2. Runs `cargo run --release --bin export_rotation`.
-3. Encodes `00001.png`, `00002.png`, ... into a high-quality H.264 MP4.
-
-Encoding settings:
-
-- codec: `libx264`
-- preset: `veryslow`
-- quality: `crf 12`
-
-### `scripts/render_zoom_in.sh`
-
-Runs the zoom export binary, then encodes the resulting image sequence into an MP4 with `ffmpeg`.
-
-Default usage:
-
-```bash
-scripts/render_zoom_in.sh
-```
+### `./scripts/render_zoom_in.sh`
 
 Default outputs:
 
 - frames: `renders/zoom_frames`
-- video: `renders/terminal_zoom.mp4`
+- video: `renders/terminal_zoom_loop.mp4`
 
-Custom paths:
+Usage:
 
 ```bash
-scripts/render_zoom_in.sh /path/to/frames /path/to/output.mp4
+./scripts/render_zoom_in.sh
+./scripts/render_zoom_in.sh /path/to/frames /path/to/output.mp4
 ```
+
+### `./scripts/render_intermission_loop.sh`
+
+Default outputs:
+
+- frames: `renders/intermission_frames`
+- video: `renders/intermission_loop.mp4`
+
+Usage:
+
+```bash
+./scripts/render_intermission_loop.sh
+./scripts/render_intermission_loop.sh /path/to/frames /path/to/output.mp4
+```
+
+### `./scripts/render_outro_loop.sh`
+
+Default outputs:
+
+- frames: `renders/shutdown_frames`
+- video: `renders/shutdown_loop.mp4`
+
+Usage:
+
+```bash
+./scripts/render_outro_loop.sh
+./scripts/render_outro_loop.sh /path/to/frames /path/to/output.mp4
+```
+
+### Shared script options
 
 Optional environment variable:
 
 ```bash
-FPS=30 scripts/render_zoom_in.sh
+FPS=30 ./scripts/render_rotation_loop.sh
 ```
 
-What the script does:
+All scripts:
 
-1. Deletes the existing frame directory.
-2. Runs `cargo run --release --bin export_zoom`.
-3. Encodes `00001.png`, `00002.png`, ... into a high-quality H.264 MP4.
+1. delete the existing frame directory
+2. run the matching `export_*` binary
+3. encode the numbered PNG sequence to H.264 MP4 with `ffmpeg`
 
 Encoding settings:
 
@@ -176,61 +216,50 @@ Encoding settings:
 
 ## Common Commands
 
-Check everything:
+Check all binaries:
 
 ```bash
 cargo check --bins
 ```
 
-Run the orbiting scene:
+Run the main scenes:
 
 ```bash
 cargo run --bin rotating_terminal
-```
-
-Run the zoom scene:
-
-```bash
 cargo run --bin stationary_terminal
+cargo run --bin intermission
+cargo run --bin shutdown_outro
 ```
 
-Export one full rotation to PNG frames:
+Render looping MP4s:
 
 ```bash
-cargo run --release --bin export_rotation
-```
-
-Export one zoom-in pass to PNG frames:
-
-```bash
-cargo run --release --bin export_zoom
-```
-
-Export rotation frames and build the MP4:
-
-```bash
-scripts/render_rotation_loop.sh
-```
-
-Export zoom frames and build the MP4:
-
-```bash
-scripts/render_zoom_in.sh
+./scripts/render_rotation_loop.sh
+./scripts/render_zoom_in.sh
+./scripts/render_intermission_loop.sh
+./scripts/render_outro_loop.sh
 ```
 
 ## Project Layout
 
 - [Cargo.toml](/Users/kisaczka/Desktop/code/rotating_terminal/Cargo.toml): dependencies and package metadata
-- [src/lib.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/lib.rs): shared scene setup, screen rendering, and export logic
-- [src/bin/rotating_terminal.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/rotating_terminal.rs): orbiting-camera entry point
-- [src/bin/stationary_terminal.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/stationary_terminal.rs): zoom-in entry point
-- [src/bin/export_rotation.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/export_rotation.rs): image-sequence export entry point
-- [src/bin/export_zoom.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/export_zoom.rs): zoom image-sequence export entry point
-- [scripts/render_rotation_loop.sh](/Users/kisaczka/Desktop/code/rotating_terminal/scripts/render_rotation_loop.sh): export-and-encode helper
-- [scripts/render_zoom_in.sh](/Users/kisaczka/Desktop/code/rotating_terminal/scripts/render_zoom_in.sh): zoom export-and-encode helper
+- [src/lib.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/lib.rs): shared scene setup, TUI rendering, camera motion, and export logic
+- [src/bin/rotating_terminal.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/rotating_terminal.rs): orbit scene
+- [src/bin/stationary_terminal.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/stationary_terminal.rs): looping zoom scene
+- [src/bin/intermission.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/intermission.rs): intermission scene
+- [src/bin/shutdown_outro.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/shutdown_outro.rs): outro scene
+- [src/bin/export_rotation.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/export_rotation.rs): rotation exporter
+- [src/bin/export_zoom.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/export_zoom.rs): zoom-loop exporter
+- [src/bin/export_intermission.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/export_intermission.rs): intermission exporter
+- [src/bin/export_shutdown.rs](/Users/kisaczka/Desktop/code/rotating_terminal/src/bin/export_shutdown.rs): outro exporter
+- [scripts/render_rotation_loop.sh](/Users/kisaczka/Desktop/code/rotating_terminal/scripts/render_rotation_loop.sh): rotation render script
+- [scripts/render_zoom_in.sh](/Users/kisaczka/Desktop/code/rotating_terminal/scripts/render_zoom_in.sh): zoom render script
+- [scripts/render_intermission_loop.sh](/Users/kisaczka/Desktop/code/rotating_terminal/scripts/render_intermission_loop.sh): intermission render script
+- [scripts/render_outro_loop.sh](/Users/kisaczka/Desktop/code/rotating_terminal/scripts/render_outro_loop.sh): outro render script
 - `vintage_terminal/`: model assets and textures
 
 ## Notes
 
+- The TUI updates at a lower cadence than the camera/render loop so screen motion reads more deliberately.
 - The export scripts expect `ffmpeg` to be available on your `PATH`.
-- The export bins write numbered PNGs, which makes them easy to re-encode into other formats later.
+- Export bins write numbered PNGs first, which makes it easy to re-encode later.

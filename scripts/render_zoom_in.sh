@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRAMES_DIR="${1:-$ROOT_DIR/renders/zoom_frames}"
-OUTPUT_MP4="${2:-$ROOT_DIR/renders/terminal_zoom.mp4}"
+OUTPUT_MP4="${2:-$ROOT_DIR/renders/terminal_zoom_loop.mp4}"
 FPS="${FPS:-60}"
 
 mkdir -p "$(dirname "$FRAMES_DIR")"

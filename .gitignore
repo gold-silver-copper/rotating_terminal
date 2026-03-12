@@ -5,3 +5,5 @@
 /renders/rotation_frames
 /renders/zoom_frames
 .DS_Store
+/renders/intermission_frames
+/renders/shutdown_frames
