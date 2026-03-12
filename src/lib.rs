@@ -1,13 +1,21 @@
-use std::f32::consts::FRAC_PI_6;
+use std::f32::consts::{FRAC_PI_6, TAU};
 
 use bevy::{
+    app::AppExit,
     asset::{AssetPlugin, RenderAssetUsages},
+    camera::RenderTarget,
     gltf::GltfMaterialName,
     image::{CompressedImageFormats, ImagePlugin, ImageSampler, ImageType},
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+    render::{
+        RenderPlugin,
+        render_resource::{
+            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        },
+    },
     scene::SceneInstanceReady,
 };
+use bevy_image_export::{ImageExport, ImageExportPlugin, ImageExportSettings, ImageExportSource};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -40,6 +48,11 @@ const SCREEN_ATLAS_WIDTH: u32 = 157;
 const SCREEN_ATLAS_HEIGHT: u32 = 233;
 const TERMINAL_BODY_COLOR: TuiColor = TuiColor::Rgb(92, 170, 92);
 const TERMINAL_BORDER_COLOR: TuiColor = TuiColor::Rgb(70, 120, 70);
+const EXPORT_WIDTH: u32 = 1024;
+const EXPORT_HEIGHT: u32 = 1024;
+const EXPORT_FPS: f64 = 60.0;
+const EXPORT_FRAMES: u32 = 240;
+const EXPORT_WARMUP_FRAMES: u32 = 24;
 
 #[derive(Resource, Clone, Copy)]
 enum CameraMode {
@@ -75,6 +88,26 @@ struct TerminalDemoApp {
     frame_count: u64,
 }
 
+#[derive(Resource, Clone)]
+struct ExportRotationConfig {
+    output_dir: String,
+    frames: u32,
+    width: u32,
+    height: u32,
+    warmup_frames: u32,
+}
+
+#[derive(Resource)]
+struct ExportCaptureState {
+    output_texture_handle: Handle<Image>,
+    exporter_started: bool,
+    warmup_frames_remaining: u32,
+    current_frame: u32,
+}
+
+#[derive(Component)]
+struct ExportCaptureCamera;
+
 impl TerminalDemoApp {
     fn new() -> Self {
         Self { frame_count: 0 }
@@ -93,6 +126,14 @@ pub fn run_stationary_terminal() {
     app(CameraMode::ZoomIn).run();
 }
 
+pub fn run_export_rotation(output_dir: String) {
+    let export_plugin = ImageExportPlugin::default();
+    let export_threads = export_plugin.threads.clone();
+
+    export_app(output_dir, export_plugin).run();
+    export_threads.finish();
+}
+
 fn app(camera_mode: CameraMode) -> App {
     let mut app = App::new();
     app.insert_resource(camera_mode)
@@ -108,6 +149,44 @@ fn app(camera_mode: CameraMode) -> App {
         .add_systems(Startup, setup)
         .add_systems(Update, (orbit_camera, zoom_camera))
         .add_systems(FixedUpdate, animate_terminal_screen);
+    app
+}
+
+fn export_app(output_dir: String, export_plugin: ImageExportPlugin) -> App {
+    let mut app = App::new();
+    app.insert_resource(CameraMode::Orbit)
+        .insert_resource(Time::<Fixed>::from_hz(EXPORT_FPS))
+        .insert_resource(ExportRotationConfig {
+            output_dir,
+            frames: EXPORT_FRAMES,
+            width: EXPORT_WIDTH,
+            height: EXPORT_HEIGHT,
+            warmup_frames: EXPORT_WARMUP_FRAMES,
+        })
+        .add_plugins(
+            DefaultPlugins
+                .set(AssetPlugin {
+                    file_path: ".".to_string(),
+                    ..default()
+                })
+                .set(ImagePlugin::default_nearest())
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        resolution: (EXPORT_WIDTH, EXPORT_HEIGHT).into(),
+                        visible: false,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    synchronous_pipeline_compilation: true,
+                    ..default()
+                }),
+        )
+        .add_plugins(export_plugin)
+        .add_systems(Startup, (setup, setup_export_capture))
+        .add_systems(Update, (orbit_camera, zoom_camera))
+        .add_systems(FixedUpdate, (animate_terminal_screen, drive_export_capture));
     app
 }
 
@@ -200,6 +279,101 @@ fn setup(world: &mut World) {
             ));
         }
     }
+}
+
+fn setup_export_capture(
+    mut commands: Commands,
+    export_config: Res<ExportRotationConfig>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let output_texture_handle = {
+        let size = Extent3d {
+            width: export_config.width,
+            height: export_config.height,
+            depth_or_array_layers: 1,
+        };
+        let mut export_texture = Image {
+            texture_descriptor: TextureDescriptor {
+                label: Some("terminal-export-texture"),
+                size,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8UnormSrgb,
+                mip_level_count: 1,
+                sample_count: 1,
+                usage: TextureUsages::COPY_DST
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            sampler: ImageSampler::nearest(),
+            asset_usage: RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            ..default()
+        };
+        export_texture.resize(size);
+        images.add(export_texture)
+    };
+
+    commands.insert_resource(ExportCaptureState {
+        output_texture_handle: output_texture_handle.clone(),
+        exporter_started: false,
+        warmup_frames_remaining: export_config.warmup_frames,
+        current_frame: 0,
+    });
+
+    commands.spawn((
+        Name::new("Export Capture Camera"),
+        ExportCaptureCamera,
+        Camera3d::default(),
+        Camera {
+            order: 1,
+            ..default()
+        },
+        RenderTarget::Image(output_texture_handle.into()),
+        Transform::from_xyz(0.0, CAMERA_HEIGHT, CAMERA_ORBIT_RADIUS).looking_at(CAMERA_LOOK_AT, Vec3::Y),
+    ));
+}
+
+fn drive_export_capture(
+    mut commands: Commands,
+    export_config: Res<ExportRotationConfig>,
+    mut export_state: ResMut<ExportCaptureState>,
+    mut capture_camera: Query<&mut Transform, With<ExportCaptureCamera>>,
+    mut export_sources: ResMut<Assets<ImageExportSource>>,
+    mut app_exit: MessageWriter<AppExit>,
+) {
+    if export_state.warmup_frames_remaining > 0 {
+        export_state.warmup_frames_remaining -= 1;
+        return;
+    }
+
+    if !export_state.exporter_started {
+        commands.spawn((
+            ImageExport(export_sources.add(export_state.output_texture_handle.clone())),
+            ImageExportSettings {
+                output_dir: export_config.output_dir.clone(),
+                extension: "png".to_string(),
+            },
+        ));
+        export_state.exporter_started = true;
+    }
+
+    if export_state.current_frame >= export_config.frames {
+        app_exit.write(AppExit::Success);
+        return;
+    }
+
+    let angle = export_state.current_frame as f32 / export_config.frames as f32 * TAU;
+    let capture_position = Vec3::new(
+        angle.sin() * CAMERA_ORBIT_RADIUS,
+        CAMERA_HEIGHT,
+        angle.cos() * CAMERA_ORBIT_RADIUS,
+    );
+    for mut transform in &mut capture_camera {
+        *transform = Transform::from_translation(capture_position).looking_at(CAMERA_LOOK_AT, Vec3::Y);
+    }
+
+    export_state.current_frame += 1;
 }
 
 fn orbit_camera(time: Res<Time>, mut query: Query<(&mut Transform, &mut OrbitCamera)>) {
