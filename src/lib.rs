@@ -48,8 +48,10 @@ const SCREEN_ATLAS_Y: u32 = 463;
 const SCREEN_ATLAS_WIDTH: u32 = 157;
 const SCREEN_ATLAS_HEIGHT: u32 = 233;
 const TERMINAL_BORDER_COLOR: TuiColor = TuiColor::Rgb(70, 120, 70);
-const EXPORT_WIDTH: u32 = 1920;
-const EXPORT_HEIGHT: u32 = 1920;
+const EXPORT_ROTATION_WIDTH: u32 = 1920;
+const EXPORT_ROTATION_HEIGHT: u32 = 1080;
+const EXPORT_ZOOM_WIDTH: u32 = 1920;
+const EXPORT_ZOOM_HEIGHT: u32 = 1080;
 const EXPORT_FPS: f64 = 60.0;
 const EXPORT_ROTATION_FRAMES: u32 = 420;
 const EXPORT_ZOOM_FRAMES: u32 = (ZOOM_DURATION_SECONDS as u32) * EXPORT_FPS as u32;
@@ -131,7 +133,15 @@ pub fn run_export_rotation(output_dir: String) {
     let export_plugin = ImageExportPlugin::default();
     let export_threads = export_plugin.threads.clone();
 
-    export_app(output_dir, export_plugin, CameraMode::Orbit, EXPORT_ROTATION_FRAMES).run();
+    export_app(
+        output_dir,
+        export_plugin,
+        CameraMode::Orbit,
+        EXPORT_ROTATION_FRAMES,
+        EXPORT_ROTATION_WIDTH,
+        EXPORT_ROTATION_HEIGHT,
+    )
+    .run();
     export_threads.finish();
 }
 
@@ -139,7 +149,15 @@ pub fn run_export_zoom(output_dir: String) {
     let export_plugin = ImageExportPlugin::default();
     let export_threads = export_plugin.threads.clone();
 
-    export_app(output_dir, export_plugin, CameraMode::ZoomIn, EXPORT_ZOOM_FRAMES).run();
+    export_app(
+        output_dir,
+        export_plugin,
+        CameraMode::ZoomIn,
+        EXPORT_ZOOM_FRAMES,
+        EXPORT_ZOOM_WIDTH,
+        EXPORT_ZOOM_HEIGHT,
+    )
+    .run();
     export_threads.finish();
 }
 
@@ -166,6 +184,8 @@ fn export_app(
     export_plugin: ImageExportPlugin,
     camera_mode: CameraMode,
     frames: u32,
+    width: u32,
+    height: u32,
 ) -> App {
     let mut app = App::new();
     app.insert_resource(camera_mode)
@@ -173,8 +193,8 @@ fn export_app(
         .insert_resource(ExportRotationConfig {
             output_dir,
             frames,
-            width: EXPORT_WIDTH,
-            height: EXPORT_HEIGHT,
+            width,
+            height,
             warmup_frames: EXPORT_WARMUP_FRAMES,
         })
         .add_plugins(
@@ -186,7 +206,7 @@ fn export_app(
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        resolution: (EXPORT_WIDTH, EXPORT_HEIGHT).into(),
+                        resolution: (width, height).into(),
                         visible: false,
                         ..default()
                     }),
