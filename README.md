@@ -4,7 +4,23 @@ Bevy 0.18.1 project that loads a `vintage_terminal` 3D model and drives its scre
 
 The `vintage_terminal` asset is from [Sketchfab: Vintage Terminal](https://sketchfab.com/3d-models/vintage-terminal-847c174b86e24d868d25217ca2297886).
 
+## Previews
+
+### Rotation
+
 ![Rotating terminal preview](https://raw.githubusercontent.com/gold-silver-copper/rotating_terminal/master/rotating_terminal_loop.webp)
+
+### Zoom
+
+![Zoom terminal preview](https://raw.githubusercontent.com/gold-silver-copper/rotating_terminal/master/terminal_zoom_loop.webp)
+
+### Intermission
+
+![Intermission preview](https://raw.githubusercontent.com/gold-silver-copper/rotating_terminal/master/intermission_loop.webp)
+
+### Shutdown
+
+![Shutdown preview](https://raw.githubusercontent.com/gold-silver-copper/rotating_terminal/master/shutdown_loop.webp)
 
 Current project surface:
 
