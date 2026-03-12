@@ -202,12 +202,38 @@ Usage:
 ./scripts/render_outro_loop.sh /path/to/frames /path/to/output.mp4
 ```
 
+### `./scripts/render_all_media.sh`
+
+Renders every scene loop and then generates animated WebP previews for each MP4.
+
+Default outputs:
+
+- videos: `renders/*.mp4`
+- WebPs:
+  - `rotating_terminal_loop.webp`
+  - `terminal_zoom_loop.webp`
+  - `intermission_loop.webp`
+  - `shutdown_loop.webp`
+
+Usage:
+
+```bash
+./scripts/render_all_media.sh
+./scripts/render_all_media.sh /path/to/renders_dir
+```
+
 ### Shared script option
 
 Override the encoded playback framerate:
 
 ```bash
 FPS=30 ./scripts/render_rotation_loop.sh
+```
+
+WebP conversion options:
+
+```bash
+WEBP_FPS=30 WEBP_SCALE_WIDTH=320 WEBP_DELAY_MS=33 WEBP_QUALITY=90 ./scripts/render_all_media.sh
 ```
 
 Each script:
@@ -247,6 +273,7 @@ Render looping MP4s:
 ./scripts/render_zoom_in.sh
 ./scripts/render_intermission_loop.sh
 ./scripts/render_outro_loop.sh
+./scripts/render_all_media.sh
 ```
 
 ## Project Layout
@@ -265,6 +292,7 @@ Render looping MP4s:
 - [scripts/render_zoom_in.sh](scripts/render_zoom_in.sh): zoom render helper
 - [scripts/render_intermission_loop.sh](scripts/render_intermission_loop.sh): intermission render helper
 - [scripts/render_outro_loop.sh](scripts/render_outro_loop.sh): shutdown render helper
+- [scripts/render_all_media.sh](scripts/render_all_media.sh): batch render and WebP generation helper
 - [vintage_terminal/](vintage_terminal/): GLTF model and source textures
 - [bevy_cube_colors/](bevy_cube_colors/): separate Bevy scratch/example app in the repo
 

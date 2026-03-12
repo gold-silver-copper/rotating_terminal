@@ -1,4 +1,4 @@
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, TAU};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI, TAU};
 
 use bevy::{
     app::AppExit,
@@ -34,10 +34,11 @@ use soft_ratatui::{
     embedded_graphics_unicodefonts::mono_4x6_atlas,
 };
 const TERMINAL_ASSET_PATH: &str = "vintage_terminal/scene.gltf";
-const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.12;
-const CAMERA_ORBIT_RADIUS: f32 = 6.0;
+const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.28;
+const CAMERA_ORBIT_RADIUS: f32 = 8.0;
 const CAMERA_HEIGHT: f32 = 1.0;
 const CAMERA_LOOK_AT: Vec3 = Vec3::new(0.0, -0.2, 0.0);
+const CAMERA_ORBIT_VERTICAL_SWAY: f32 = 0.35;
 const ZOOM_CAMERA_START: Vec3 = Vec3::new(-0.35, 0.55, 8.4);
 const ZOOM_CAMERA_END: Vec3 = Vec3::new(-0.6, 0.0, 2.5);
 const ZOOM_CAMERA_LOOK_AT_START: Vec3 = Vec3::new(-0.1, -0.75, 0.35);
@@ -45,6 +46,12 @@ const ZOOM_CAMERA_LOOK_AT_END: Vec3 = Vec3::new(-0.18, 0.5, 0.62);
 const ZOOM_DURATION_SECONDS: f32 = 16.0;
 const TERMINAL_SCENE_OFFSET: Vec3 = Vec3::new(0.0, 0.25, 0.0);
 const TERMINAL_SCALE: Vec3 = Vec3::splat(1.0);
+const TERMINAL_FOOTPRINT_WIDTH: f32 = 3.265587;
+const TERMINAL_FOOTPRINT_DEPTH: f32 = 2.057711;
+const TERMINAL_CLUSTER_CLEARANCE: f32 = 0.04;
+const TERMINAL_CLUSTER_GAP: f32 = TERMINAL_FOOTPRINT_WIDTH + TERMINAL_CLUSTER_CLEARANCE;
+const TERMINAL_CLUSTER_OFFSET: f32 =
+    (TERMINAL_CLUSTER_GAP + TERMINAL_FOOTPRINT_DEPTH) * 0.5;
 const FLOOR_Y: f32 = -0.884;
 const HIDDEN_SCENE_NODE_NAMES: &[&str] = &[];
 const SCREEN_MATERIAL_NAME: &str = "Material.002";
@@ -60,7 +67,7 @@ const TERMINAL_SURFACE_MIN_ROUGHNESS: f32 = 0.97;
 const TERMINAL_SURFACE_MAX_METALLIC: f32 = 0.0;
 const TERMINAL_SURFACE_MAX_REFLECTANCE: f32 = 0.01;
 const TUI_UPDATE_FPS: f64 = 15.0;
-const LIVE_FIXED_FPS: f64 = 30.0;
+const LIVE_FIXED_FPS: f64 = 60.0;
 const EXPORT_ROTATION_WIDTH: u32 = 1920;
 const EXPORT_ROTATION_HEIGHT: u32 = 1080;
 const EXPORT_ZOOM_WIDTH: u32 = 1920;
@@ -136,6 +143,12 @@ struct ExportCaptureState {
 
 #[derive(Component)]
 struct ExportCaptureCamera;
+
+struct TerminalInstance {
+    name: &'static str,
+    position: Vec3,
+    rotation: Quat,
+}
 
 impl TerminalDemoApp {
     fn new() -> Self {
@@ -357,14 +370,16 @@ fn setup(world: &mut World) {
             Visibility::default(),
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Name::new("Vintage Terminal"),
-                SceneRoot(terminal_scene),
-                Transform::from_translation(TERMINAL_SCENE_OFFSET)
-                    .with_rotation(Quat::IDENTITY)
-                    .with_scale(TERMINAL_SCALE),
-            ))
-            .observe(configure_terminal_scene_when_ready);
+            for terminal in terminal_instances() {
+                parent.spawn((
+                    Name::new(terminal.name),
+                    SceneRoot(terminal_scene.clone()),
+                    Transform::from_translation(TERMINAL_SCENE_OFFSET + terminal.position)
+                        .with_rotation(terminal.rotation)
+                        .with_scale(TERMINAL_SCALE),
+                ))
+                .observe(configure_terminal_scene_when_ready);
+            }
         });
 
     commands.spawn((
@@ -593,7 +608,7 @@ fn camera_transform(scene_mode: SceneMode, progress: f32) -> Transform {
             let angle = progress * TAU;
             let position = Vec3::new(
                 angle.sin() * CAMERA_ORBIT_RADIUS,
-                CAMERA_HEIGHT,
+                CAMERA_HEIGHT + (angle * 2.0).sin() * CAMERA_ORBIT_VERTICAL_SWAY,
                 angle.cos() * CAMERA_ORBIT_RADIUS,
             );
             Transform::from_translation(position).looking_at(CAMERA_LOOK_AT, Vec3::Y)
@@ -767,6 +782,31 @@ fn configure_terminal_scene_when_ready(
             .entity(descendant)
             .insert(MeshMaterial3d(terminal_screen_material.0.clone()));
     }
+}
+
+fn terminal_instances() -> [TerminalInstance; 4] {
+    [
+        TerminalInstance {
+            name: "Vintage Terminal North",
+            position: Vec3::new(0.0, 0.0, TERMINAL_CLUSTER_OFFSET),
+            rotation: Quat::IDENTITY,
+        },
+        TerminalInstance {
+            name: "Vintage Terminal East",
+            position: Vec3::new(TERMINAL_CLUSTER_OFFSET, 0.0, 0.0),
+            rotation: Quat::from_rotation_y(FRAC_PI_2),
+        },
+        TerminalInstance {
+            name: "Vintage Terminal South",
+            position: Vec3::new(0.0, 0.0, -TERMINAL_CLUSTER_OFFSET),
+            rotation: Quat::from_rotation_y(PI),
+        },
+        TerminalInstance {
+            name: "Vintage Terminal West",
+            position: Vec3::new(-TERMINAL_CLUSTER_OFFSET, 0.0, 0.0),
+            rotation: Quat::from_rotation_y(-FRAC_PI_2),
+        },
+    ]
 }
 
 fn build_terminal_screen_renderer(scene_mode: SceneMode) -> TerminalScreenRenderer {
