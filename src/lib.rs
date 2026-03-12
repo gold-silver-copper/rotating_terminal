@@ -54,6 +54,7 @@ const SCREEN_ATLAS_Y: u32 = 463;
 const SCREEN_ATLAS_WIDTH: u32 = 157;
 const SCREEN_ATLAS_HEIGHT: u32 = 233;
 const TERMINAL_BORDER_COLOR: TuiColor = TuiColor::Rgb(70, 120, 70);
+const BLOOM_INTENSITY: f32 = 0.18;
 const EXPORT_ROTATION_WIDTH: u32 = 1920;
 const EXPORT_ROTATION_HEIGHT: u32 = 1080;
 const EXPORT_ZOOM_WIDTH: u32 = 1920;
@@ -341,7 +342,7 @@ fn setup(world: &mut World) {
             inner_angle: 0.55,
             outer_angle: 0.85,
             shadows_enabled: false,
-            color: Color::srgb(1.0, 0.25, 0.85),
+            color: Color::srgb(0.12, 0.42, 0.2),
             ..default()
         },
         Transform::from_xyz(-5.5, 4.0, -4.0).looking_at(Vec3::new(0.0, -0.7, 0.1), Vec3::Y),
@@ -356,14 +357,17 @@ fn setup(world: &mut World) {
                 Msaa::Off,
                 Hdr,
                 Tonemapping::TonyMcMapface,
-                Bloom::NATURAL,
+                Bloom {
+                    intensity: BLOOM_INTENSITY,
+                    ..Bloom::NATURAL
+                },
                 ScreenSpaceAmbientOcclusion {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
                     ..default()
                 },
                 DistanceFog {
                     color: Color::srgba(0.03, 0.01, 0.07, 1.0),
-                    directional_light_color: Color::srgba(0.2, 0.05, 0.2, 0.2),
+                    directional_light_color: Color::srgba(0.03, 0.12, 0.06, 0.2),
                     falloff: FogFalloff::Linear {
                         start: 10.0,
                         end: 28.0,
@@ -382,14 +386,17 @@ fn setup(world: &mut World) {
                 Msaa::Off,
                 Hdr,
                 Tonemapping::TonyMcMapface,
-                Bloom::NATURAL,
+                Bloom {
+                    intensity: BLOOM_INTENSITY,
+                    ..Bloom::NATURAL
+                },
                 ScreenSpaceAmbientOcclusion {
                     quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
                     ..default()
                 },
                 DistanceFog {
                     color: Color::srgba(0.03, 0.01, 0.07, 1.0),
-                    directional_light_color: Color::srgba(0.2, 0.05, 0.2, 0.2),
+                    directional_light_color: Color::srgba(0.03, 0.12, 0.06, 0.2),
                     falloff: FogFalloff::Linear {
                         start: 9.0,
                         end: 24.0,
@@ -451,14 +458,17 @@ fn setup_export_capture(
         Msaa::Off,
         Hdr,
         Tonemapping::TonyMcMapface,
-        Bloom::NATURAL,
+        Bloom {
+            intensity: BLOOM_INTENSITY,
+            ..Bloom::NATURAL
+        },
         ScreenSpaceAmbientOcclusion {
             quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
             ..default()
         },
         DistanceFog {
             color: Color::srgba(0.03, 0.01, 0.07, 1.0),
-            directional_light_color: Color::srgba(0.2, 0.05, 0.2, 0.2),
+            directional_light_color: Color::srgba(0.03, 0.12, 0.06, 0.2),
             falloff: FogFalloff::Linear {
                 start: 9.0,
                 end: 28.0,
