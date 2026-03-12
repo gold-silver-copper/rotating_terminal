@@ -4,14 +4,19 @@ use bevy::{
     app::AppExit,
     asset::{AssetPlugin, RenderAssetUsages},
     camera::RenderTarget,
+    core_pipeline::tonemapping::Tonemapping,
     gltf::GltfMaterialName,
     image::{CompressedImageFormats, ImagePlugin, ImageSampler, ImageType},
+    light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap},
+    pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel},
+    post_process::bloom::Bloom,
     prelude::*,
     render::{
         RenderPlugin,
         render_resource::{
             Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
         },
+        view::Hdr,
     },
     scene::SceneInstanceReady,
 };
@@ -39,6 +44,7 @@ const ZOOM_CAMERA_LOOK_AT_END: Vec3 = Vec3::new(-0.18, 0.5, 0.62);
 const ZOOM_DURATION_SECONDS: f32 = 28.0;
 const TERMINAL_SCENE_OFFSET: Vec3 = Vec3::new(0.0, 0.25, 0.0);
 const TERMINAL_SCALE: Vec3 = Vec3::splat(1.0);
+const FLOOR_Y: f32 = -0.884;
 const HIDDEN_SCENE_NODE_NAMES: &[&str] = &[];
 const SCREEN_MATERIAL_NAME: &str = "Material.002";
 const SCREEN_COLUMNS: u16 = 14;
@@ -225,9 +231,11 @@ fn export_app(
 }
 
 fn setup(world: &mut World) {
+    world.insert_resource(ClearColor(Color::srgb(0.01, 0.0, 0.03)));
+    world.insert_resource(DirectionalLightShadowMap { size: 4096 });
     world.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.85, 0.9, 1.0),
-        brightness: 200.0,
+        brightness: 140.0,
         affects_lightmapped_meshes: true,
     });
 
@@ -258,10 +266,27 @@ fn setup(world: &mut World) {
         asset_server.load(GltfAssetLabel::Scene(0).from_asset(TERMINAL_ASSET_PATH))
     };
     let camera_mode = *world.resource::<CameraMode>();
+    let floor_mesh = {
+        let mut meshes = world.resource_mut::<Assets<Mesh>>();
+        meshes.add(Plane3d::default().mesh().size(40.0, 40.0))
+    };
+    let floor_material = {
+        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(0.01, 0.02, 0.08),
+            perceptual_roughness: 0.92,
+            metallic: 0.02,
+            ..default()
+        })
+    };
     let mut commands = world.commands();
 
     commands
-        .spawn((Name::new("Terminal Pivot"), Transform::default()))
+        .spawn((
+            Name::new("Terminal Pivot"),
+            Transform::default(),
+            Visibility::default(),
+        ))
         .with_children(|parent| {
             parent.spawn((
                 Name::new("Vintage Terminal"),
@@ -274,24 +299,52 @@ fn setup(world: &mut World) {
         });
 
     commands.spawn((
+        Name::new("Floor"),
+        Mesh3d(floor_mesh),
+        MeshMaterial3d(floor_material),
+        Transform::from_xyz(0.0, FLOOR_Y, 0.0),
+    ));
+
+    commands.spawn((
         Name::new("Key Light"),
         DirectionalLight {
-            illuminance: 18_000.0,
+            illuminance: 24_000.0,
             shadows_enabled: true,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, -FRAC_PI_6, -FRAC_PI_6)),
+        CascadeShadowConfigBuilder {
+            maximum_distance: 24.0,
+            first_cascade_far_bound: 8.0,
+            ..default()
+        }
+        .build(),
     ));
 
     commands.spawn((
         Name::new("Fill Light"),
         PointLight {
-            intensity: 900_000.0,
-            range: 30.0,
-            shadows_enabled: true,
+            intensity: 1_300_000.0,
+            range: 36.0,
+            shadows_enabled: false,
+            color: Color::srgb(0.4, 0.9, 1.0),
             ..default()
         },
-        Transform::from_xyz(4.0, 6.0, 5.0),
+        Transform::from_xyz(4.5, 5.5, 4.0),
+    ));
+
+    commands.spawn((
+        Name::new("Rim Light"),
+        SpotLight {
+            intensity: 3_500_000.0,
+            range: 28.0,
+            inner_angle: 0.55,
+            outer_angle: 0.85,
+            shadows_enabled: false,
+            color: Color::srgb(1.0, 0.25, 0.85),
+            ..default()
+        },
+        Transform::from_xyz(-5.5, 4.0, -4.0).looking_at(Vec3::new(0.0, -0.7, 0.1), Vec3::Y),
     ));
 
     match camera_mode {
@@ -300,6 +353,23 @@ fn setup(world: &mut World) {
                 Name::new("Orbit Camera"),
                 OrbitCamera { angle: 0.0 },
                 Camera3d::default(),
+                Msaa::Off,
+                Hdr,
+                Tonemapping::TonyMcMapface,
+                Bloom::NATURAL,
+                ScreenSpaceAmbientOcclusion {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+                    ..default()
+                },
+                DistanceFog {
+                    color: Color::srgba(0.03, 0.01, 0.07, 1.0),
+                    directional_light_color: Color::srgba(0.2, 0.05, 0.2, 0.2),
+                    falloff: FogFalloff::Linear {
+                        start: 10.0,
+                        end: 28.0,
+                    },
+                    ..default()
+                },
                 Transform::from_xyz(0.0, CAMERA_HEIGHT, CAMERA_ORBIT_RADIUS)
                     .looking_at(CAMERA_LOOK_AT, Vec3::Y),
             ));
@@ -309,6 +379,23 @@ fn setup(world: &mut World) {
                 Name::new("Zoom Camera"),
                 ZoomCamera { progress: 0.0 },
                 Camera3d::default(),
+                Msaa::Off,
+                Hdr,
+                Tonemapping::TonyMcMapface,
+                Bloom::NATURAL,
+                ScreenSpaceAmbientOcclusion {
+                    quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+                    ..default()
+                },
+                DistanceFog {
+                    color: Color::srgba(0.03, 0.01, 0.07, 1.0),
+                    directional_light_color: Color::srgba(0.2, 0.05, 0.2, 0.2),
+                    falloff: FogFalloff::Linear {
+                        start: 9.0,
+                        end: 24.0,
+                    },
+                    ..default()
+                },
                 Transform::from_translation(ZOOM_CAMERA_START)
                     .looking_at(ZOOM_CAMERA_LOOK_AT_START, Vec3::Y),
             ));
@@ -361,6 +448,23 @@ fn setup_export_capture(
         Name::new("Export Capture Camera"),
         ExportCaptureCamera,
         Camera3d::default(),
+        Msaa::Off,
+        Hdr,
+        Tonemapping::TonyMcMapface,
+        Bloom::NATURAL,
+        ScreenSpaceAmbientOcclusion {
+            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+            ..default()
+        },
+        DistanceFog {
+            color: Color::srgba(0.03, 0.01, 0.07, 1.0),
+            directional_light_color: Color::srgba(0.2, 0.05, 0.2, 0.2),
+            falloff: FogFalloff::Linear {
+                start: 9.0,
+                end: 28.0,
+            },
+            ..default()
+        },
         Camera {
             order: 1,
             ..default()
