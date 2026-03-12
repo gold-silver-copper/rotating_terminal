@@ -29,12 +29,12 @@ Current project surface:
 - intermission/standby loop
 - shutdown/outro loop
 - PNG exporters for every scene
-- `ffmpeg` helper scripts that encode high-quality H.264 MP4 loops
+- render scripts that generate both H.264 MP4 loops and animated WebP previews
 
 ## Requirements
 
 - Rust and Cargo
-- `ffmpeg` for the render scripts
+- `ffmpeg` and `img2webp` for the render scripts
 
 ## Install / Verify
 
@@ -168,12 +168,14 @@ Default outputs:
 
 - frames: `renders/rotation_frames`
 - video: `renders/rotating_terminal_loop.mp4`
+- preview: `rotating_terminal_loop.webp`
 
 Usage:
 
 ```bash
 ./scripts/render_rotation_loop.sh
 ./scripts/render_rotation_loop.sh /path/to/frames /path/to/output.mp4
+./scripts/render_rotation_loop.sh /path/to/frames /path/to/output.mp4 /path/to/output.webp
 ```
 
 ### `./scripts/render_zoom_in.sh`
@@ -182,12 +184,14 @@ Default outputs:
 
 - frames: `renders/zoom_frames`
 - video: `renders/terminal_zoom_loop.mp4`
+- preview: `terminal_zoom_loop.webp`
 
 Usage:
 
 ```bash
 ./scripts/render_zoom_in.sh
 ./scripts/render_zoom_in.sh /path/to/frames /path/to/output.mp4
+./scripts/render_zoom_in.sh /path/to/frames /path/to/output.mp4 /path/to/output.webp
 ```
 
 ### `./scripts/render_intermission_loop.sh`
@@ -196,12 +200,14 @@ Default outputs:
 
 - frames: `renders/intermission_frames`
 - video: `renders/intermission_loop.mp4`
+- preview: `intermission_loop.webp`
 
 Usage:
 
 ```bash
 ./scripts/render_intermission_loop.sh
 ./scripts/render_intermission_loop.sh /path/to/frames /path/to/output.mp4
+./scripts/render_intermission_loop.sh /path/to/frames /path/to/output.mp4 /path/to/output.webp
 ```
 
 ### `./scripts/render_outro_loop.sh`
@@ -210,17 +216,19 @@ Default outputs:
 
 - frames: `renders/shutdown_frames`
 - video: `renders/shutdown_loop.mp4`
+- preview: `shutdown_loop.webp`
 
 Usage:
 
 ```bash
 ./scripts/render_outro_loop.sh
 ./scripts/render_outro_loop.sh /path/to/frames /path/to/output.mp4
+./scripts/render_outro_loop.sh /path/to/frames /path/to/output.mp4 /path/to/output.webp
 ```
 
 ### `./scripts/render_all_media.sh`
 
-Renders every scene loop and then generates animated WebP previews for each MP4.
+Runs the four scene-specific render scripts.
 
 Default outputs:
 
@@ -238,7 +246,7 @@ Usage:
 ./scripts/render_all_media.sh /path/to/renders_dir
 ```
 
-### Shared script option
+### Shared script options
 
 Override the encoded playback framerate:
 
@@ -249,7 +257,7 @@ FPS=30 ./scripts/render_rotation_loop.sh
 WebP conversion options:
 
 ```bash
-WEBP_FPS=30 WEBP_SCALE_WIDTH=320 WEBP_DELAY_MS=33 WEBP_QUALITY=90 ./scripts/render_all_media.sh
+WEBP_FPS=30 WEBP_SCALE_WIDTH=320 WEBP_DELAY_MS=33 WEBP_QUALITY=90 ./scripts/render_rotation_loop.sh
 ```
 
 Each script:
@@ -257,6 +265,7 @@ Each script:
 1. deletes the existing frame directory
 2. runs the matching `export_*` binary
 3. encodes the PNG sequence to an H.264 MP4 with `ffmpeg`
+4. converts the MP4 to an animated WebP with `img2webp`
 
 Encoding settings:
 
@@ -264,6 +273,12 @@ Encoding settings:
 - preset: `veryslow`
 - quality: `crf 12`
 - pixel format: `yuv420p`
+
+WebP defaults:
+
+- frame rate: `30 fps`
+- width: `320 px`
+- quality: `90`
 
 ## Common Commands
 
@@ -308,7 +323,7 @@ Render looping MP4s:
 - [scripts/render_zoom_in.sh](scripts/render_zoom_in.sh): zoom render helper
 - [scripts/render_intermission_loop.sh](scripts/render_intermission_loop.sh): intermission render helper
 - [scripts/render_outro_loop.sh](scripts/render_outro_loop.sh): shutdown render helper
-- [scripts/render_all_media.sh](scripts/render_all_media.sh): batch render and WebP generation helper
+- [scripts/render_all_media.sh](scripts/render_all_media.sh): batch wrapper around the four scene render helpers
 - [vintage_terminal/](vintage_terminal/): GLTF model and source textures
 - [bevy_cube_colors/](bevy_cube_colors/): separate Bevy scratch/example app in the repo
 
