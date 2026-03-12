@@ -1,14 +1,17 @@
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_6, PI, TAU};
 
 use bevy::{
+    anti_alias::smaa::{Smaa, SmaaPreset},
     app::AppExit,
     asset::{AssetPlugin, RenderAssetUsages},
     camera::RenderTarget,
     core_pipeline::tonemapping::Tonemapping,
     gltf::GltfMaterialName,
     image::{CompressedImageFormats, ImagePlugin, ImageSampler, ImageType},
-    light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap},
-    pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel},
+    light::{
+        CascadeShadowConfigBuilder, DirectionalLightShadowMap, ShadowFilteringMethod,
+        VolumetricFog, VolumetricLight,
+    },
     post_process::bloom::Bloom,
     prelude::*,
     render::{
@@ -29,10 +32,7 @@ use ratatui::{
     text::{Line as TuiLine, Text as TuiText},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-use soft_ratatui::{
-    EmbeddedGraphics, SoftBackend,
-    embedded_graphics_unicodefonts::mono_4x6_atlas,
-};
+use soft_ratatui::{EmbeddedGraphics, SoftBackend, embedded_graphics_unicodefonts::mono_4x6_atlas};
 const TERMINAL_ASSET_PATH: &str = "vintage_terminal/scene.gltf";
 const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.28;
 const CAMERA_ORBIT_RADIUS: f32 = 8.0;
@@ -50,8 +50,7 @@ const TERMINAL_FOOTPRINT_WIDTH: f32 = 3.265587;
 const TERMINAL_FOOTPRINT_DEPTH: f32 = 2.057711;
 const TERMINAL_CLUSTER_CLEARANCE: f32 = 0.04;
 const TERMINAL_CLUSTER_GAP: f32 = TERMINAL_FOOTPRINT_WIDTH + TERMINAL_CLUSTER_CLEARANCE;
-const TERMINAL_CLUSTER_OFFSET: f32 =
-    (TERMINAL_CLUSTER_GAP + TERMINAL_FOOTPRINT_DEPTH) * 0.5;
+const TERMINAL_CLUSTER_OFFSET: f32 = (TERMINAL_CLUSTER_GAP + TERMINAL_FOOTPRINT_DEPTH) * 0.5;
 const FLOOR_Y: f32 = -0.884;
 const HIDDEN_SCENE_NODE_NAMES: &[&str] = &[];
 const SCREEN_MATERIAL_NAME: &str = "Material.002";
@@ -68,10 +67,14 @@ const TERMINAL_SURFACE_MAX_METALLIC: f32 = 0.0;
 const TERMINAL_SURFACE_MAX_REFLECTANCE: f32 = 0.01;
 const TUI_UPDATE_FPS: f64 = 15.0;
 const LIVE_FIXED_FPS: f64 = 60.0;
-const EXPORT_ROTATION_WIDTH: u32 = 1920;
-const EXPORT_ROTATION_HEIGHT: u32 = 1080;
-const EXPORT_ZOOM_WIDTH: u32 = 1920;
-const EXPORT_ZOOM_HEIGHT: u32 = 1080;
+const CAMERA_MSAA: Msaa = Msaa::Off;
+const CAMERA_SMAA: Smaa = Smaa {
+    preset: SmaaPreset::Ultra,
+};
+const EXPORT_ROTATION_WIDTH: u32 = 3840;
+const EXPORT_ROTATION_HEIGHT: u32 = 2160;
+const EXPORT_ZOOM_WIDTH: u32 = 3840;
+const EXPORT_ZOOM_HEIGHT: u32 = 2160;
 const EXPORT_FPS: f64 = 60.0;
 const EXPORT_ROTATION_FRAMES: u32 = 420;
 const EXPORT_ZOOM_FRAMES: u32 = ((ZOOM_DURATION_SECONDS * 2.0) as u32) * EXPORT_FPS as u32;
@@ -86,6 +89,9 @@ const SHUTDOWN_CAMERA_START: Vec3 = Vec3::new(-0.12, 1.25, 7.1);
 const SHUTDOWN_CAMERA_END: Vec3 = Vec3::new(-0.25, 1.6, 8.9);
 const SHUTDOWN_CAMERA_LOOK_AT: Vec3 = Vec3::new(-0.04, -0.22, 0.14);
 const SHUTDOWN_DURATION_SECONDS: f32 = 8.0;
+const SHADOW_CASCADE_FAR_BOUND: f32 = 5.0;
+const SHADOW_MAX_DISTANCE: f32 = 16.0;
+const VOLUMETRIC_FOG_AMBIENT_INTENSITY: f32 = 0.0;
 
 #[derive(Resource, Clone, Copy)]
 enum SceneMode {
@@ -181,66 +187,56 @@ pub fn run_shutdown_outro() {
 }
 
 pub fn run_export_rotation(output_dir: String) {
-    let export_plugin = ImageExportPlugin::default();
-    let export_threads = export_plugin.threads.clone();
-
-    export_app(
+    run_export_scene(
         output_dir,
-        export_plugin,
         SceneMode::Orbit,
         EXPORT_ROTATION_FRAMES,
         EXPORT_ROTATION_WIDTH,
         EXPORT_ROTATION_HEIGHT,
-    )
-    .run();
-    export_threads.finish();
+    );
 }
 
 pub fn run_export_zoom(output_dir: String) {
-    let export_plugin = ImageExportPlugin::default();
-    let export_threads = export_plugin.threads.clone();
-
-    export_app(
+    run_export_scene(
         output_dir,
-        export_plugin,
         SceneMode::ZoomIn,
         EXPORT_ZOOM_FRAMES,
         EXPORT_ZOOM_WIDTH,
         EXPORT_ZOOM_HEIGHT,
-    )
-    .run();
-    export_threads.finish();
+    );
 }
 
 pub fn run_export_intermission(output_dir: String) {
-    let export_plugin = ImageExportPlugin::default();
-    let export_threads = export_plugin.threads.clone();
-
-    export_app(
+    run_export_scene(
         output_dir,
-        export_plugin,
         SceneMode::Intermission,
         EXPORT_INTERMISSION_FRAMES,
         EXPORT_ZOOM_WIDTH,
         EXPORT_ZOOM_HEIGHT,
-    )
-    .run();
-    export_threads.finish();
+    );
 }
 
 pub fn run_export_shutdown(output_dir: String) {
-    let export_plugin = ImageExportPlugin::default();
-    let export_threads = export_plugin.threads.clone();
-
-    export_app(
+    run_export_scene(
         output_dir,
-        export_plugin,
         SceneMode::ShutdownLoop,
         EXPORT_SHUTDOWN_FRAMES,
         EXPORT_ZOOM_WIDTH,
         EXPORT_ZOOM_HEIGHT,
-    )
-    .run();
+    );
+}
+
+fn run_export_scene(
+    output_dir: String,
+    scene_mode: SceneMode,
+    frames: u32,
+    width: u32,
+    height: u32,
+) {
+    let export_plugin = ImageExportPlugin::default();
+    let export_threads = export_plugin.threads.clone();
+
+    export_app(output_dir, export_plugin, scene_mode, frames, width, height).run();
     export_threads.finish();
 }
 
@@ -308,13 +304,16 @@ fn export_app(
         .add_plugins(export_plugin)
         .add_systems(Startup, (setup, setup_export_capture))
         .add_systems(Update, update_scene_camera)
-        .add_systems(Update, (animate_terminal_screen_export, drive_export_capture));
+        .add_systems(
+            Update,
+            (animate_terminal_screen_export, drive_export_capture),
+        );
     app
 }
 
 fn setup(world: &mut World) {
     world.insert_resource(ClearColor(Color::srgb(0.01, 0.0, 0.03)));
-    world.insert_resource(DirectionalLightShadowMap { size: 4096 });
+    world.insert_resource(DirectionalLightShadowMap { size: 8192 });
     world.insert_resource(GlobalAmbientLight {
         color: Color::srgb(0.85, 0.9, 1.0),
         brightness: 140.0,
@@ -371,14 +370,15 @@ fn setup(world: &mut World) {
         ))
         .with_children(|parent| {
             for terminal in terminal_instances() {
-                parent.spawn((
-                    Name::new(terminal.name),
-                    SceneRoot(terminal_scene.clone()),
-                    Transform::from_translation(TERMINAL_SCENE_OFFSET + terminal.position)
-                        .with_rotation(terminal.rotation)
-                        .with_scale(TERMINAL_SCALE),
-                ))
-                .observe(configure_terminal_scene_when_ready);
+                parent
+                    .spawn((
+                        Name::new(terminal.name),
+                        SceneRoot(terminal_scene.clone()),
+                        Transform::from_translation(TERMINAL_SCENE_OFFSET + terminal.position)
+                            .with_rotation(terminal.rotation)
+                            .with_scale(TERMINAL_SCALE),
+                    ))
+                    .observe(configure_terminal_scene_when_ready);
             }
         });
 
@@ -397,9 +397,11 @@ fn setup(world: &mut World) {
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, -FRAC_PI_6, -FRAC_PI_6)),
+        VolumetricLight,
         CascadeShadowConfigBuilder {
-            maximum_distance: 24.0,
-            first_cascade_far_bound: 8.0,
+            num_cascades: 1,
+            maximum_distance: SHADOW_MAX_DISTANCE,
+            first_cascade_far_bound: SHADOW_CASCADE_FAR_BOUND,
             ..default()
         }
         .build(),
@@ -435,15 +437,17 @@ fn setup(world: &mut World) {
         Name::new("Scene Camera"),
         SceneCamera,
         Camera3d::default(),
-        Msaa::Off,
+        CAMERA_MSAA,
+        CAMERA_SMAA,
         Hdr,
         Tonemapping::TonyMcMapface,
         Bloom {
             intensity: BLOOM_INTENSITY,
             ..Bloom::NATURAL
         },
-        ScreenSpaceAmbientOcclusion {
-            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+        ShadowFilteringMethod::Gaussian,
+        VolumetricFog {
+            ambient_intensity: VOLUMETRIC_FOG_AMBIENT_INTENSITY,
             ..default()
         },
         DistanceFog {
@@ -504,15 +508,17 @@ fn setup_export_capture(
         Name::new("Export Capture Camera"),
         ExportCaptureCamera,
         Camera3d::default(),
-        Msaa::Off,
+        CAMERA_MSAA,
+        CAMERA_SMAA,
         Hdr,
         Tonemapping::TonyMcMapface,
         Bloom {
             intensity: BLOOM_INTENSITY,
             ..Bloom::NATURAL
         },
-        ScreenSpaceAmbientOcclusion {
-            quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High,
+        ShadowFilteringMethod::Gaussian,
+        VolumetricFog {
+            ambient_intensity: VOLUMETRIC_FOG_AMBIENT_INTENSITY,
             ..default()
         },
         DistanceFog {
@@ -568,10 +574,12 @@ fn drive_export_capture(
             SceneMode::Orbit | SceneMode::Intermission => {
                 cyclic_export_progress(export_state.current_frame, export_config.frames)
             }
-            SceneMode::ZoomIn => zoom_export_progress(export_state.current_frame, export_config.frames),
-            SceneMode::ShutdownLoop => {
-                ping_pong_progress(export_state.current_frame as f32 / export_config.frames as f32 * 2.0)
+            SceneMode::ZoomIn => {
+                zoom_export_progress(export_state.current_frame, export_config.frames)
             }
+            SceneMode::ShutdownLoop => ping_pong_progress(
+                export_state.current_frame as f32 / export_config.frames as f32 * 2.0,
+            ),
             _ if export_config.frames <= 1 => 1.0,
             _ => export_state.current_frame as f32 / (export_config.frames - 1) as f32,
         };
@@ -620,17 +628,17 @@ fn camera_transform(scene_mode: SceneMode, progress: f32) -> Transform {
         }
         SceneMode::Intermission => {
             let angle = progress * TAU;
-            let drift = Vec3::new(angle.cos() * 0.14, (angle * 0.35).sin() * 0.05, angle.sin() * 0.18);
+            let drift = Vec3::new(
+                angle.cos() * 0.14,
+                (angle * 0.35).sin() * 0.05,
+                angle.sin() * 0.18,
+            );
             let look_at =
                 INTERMISSION_CAMERA_LOOK_AT + Vec3::new((angle * 0.4).sin() * 0.02, 0.01, 0.0);
-            Transform::from_translation(INTERMISSION_CAMERA_BASE + drift).looking_at(look_at, Vec3::Y)
+            Transform::from_translation(INTERMISSION_CAMERA_BASE + drift)
+                .looking_at(look_at, Vec3::Y)
         }
-        SceneMode::ShutdownOutro => {
-            let eased = ease_in_out_cubic(progress);
-            let position = SHUTDOWN_CAMERA_START.lerp(SHUTDOWN_CAMERA_END, eased);
-            Transform::from_translation(position).looking_at(SHUTDOWN_CAMERA_LOOK_AT, Vec3::Y)
-        }
-        SceneMode::ShutdownLoop => {
+        SceneMode::ShutdownOutro | SceneMode::ShutdownLoop => {
             let eased = ease_in_out_cubic(progress);
             let position = SHUTDOWN_CAMERA_START.lerp(SHUTDOWN_CAMERA_END, eased);
             Transform::from_translation(position).looking_at(SHUTDOWN_CAMERA_LOOK_AT, Vec3::Y)
@@ -771,8 +779,9 @@ fn configure_terminal_scene_when_ready(
                 material.metallic_roughness_texture = None;
                 material.emissive_texture = None;
                 material.emissive = LinearRgba::BLACK;
-                material.perceptual_roughness =
-                    material.perceptual_roughness.max(TERMINAL_SURFACE_MIN_ROUGHNESS);
+                material.perceptual_roughness = material
+                    .perceptual_roughness
+                    .max(TERMINAL_SURFACE_MIN_ROUGHNESS);
                 material.metallic = material.metallic.min(TERMINAL_SURFACE_MAX_METALLIC);
                 material.reflectance = material.reflectance.min(TERMINAL_SURFACE_MAX_REFLECTANCE);
             }
@@ -811,13 +820,8 @@ fn terminal_instances() -> [TerminalInstance; 4] {
 
 fn build_terminal_screen_renderer(scene_mode: SceneMode) -> TerminalScreenRenderer {
     let font_regular = mono_4x6_atlas();
-    let backend = SoftBackend::<EmbeddedGraphics>::new(
-        SCREEN_COLUMNS,
-        SCREEN_ROWS,
-        font_regular,
-        None,
-        None,
-    );
+    let backend =
+        SoftBackend::<EmbeddedGraphics>::new(SCREEN_COLUMNS, SCREEN_ROWS, font_regular, None, None);
     let terminal = Terminal::new(backend).expect("soft_ratatui backend should initialize");
     let atlas_template = load_screen_atlas_template();
     let atlas_width = atlas_template.texture_descriptor.size.width;
@@ -845,10 +849,7 @@ fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp, scene_mode
         _ => 1,
     };
 
-    frame.render_widget(
-        Block::new().style(TuiStyle::default().bg(background)),
-        area,
-    );
+    frame.render_widget(Block::new().style(TuiStyle::default().bg(background)), area);
 
     let frame_area = area.inner(Margin::new(horizontal_margin, 0));
     let block = Block::new()
@@ -859,7 +860,9 @@ fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp, scene_mode
     frame.render_widget(block, frame_area);
 
     match scene_mode {
-        SceneMode::Orbit | SceneMode::ZoomIn => draw_live_soon_screen(frame, inner, frame_index, title_color),
+        SceneMode::Orbit | SceneMode::ZoomIn => {
+            draw_live_soon_screen(frame, inner, frame_index, title_color)
+        }
         SceneMode::Intermission => draw_intermission_screen(frame, inner, frame_index, title_color),
         SceneMode::ShutdownOutro | SceneMode::ShutdownLoop => {
             draw_shutdown_outro_screen(frame, inner, app, scene_mode, title_color)
@@ -867,7 +870,12 @@ fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp, scene_mode
     }
 }
 
-fn draw_live_soon_screen(frame: &mut Frame, inner: TuiRect, frame_index: u64, title_color: TuiColor) {
+fn draw_live_soon_screen(
+    frame: &mut Frame,
+    inner: TuiRect,
+    frame_index: u64,
+    title_color: TuiColor,
+) {
     let flash_on = (frame_index / 8).is_multiple_of(2);
     let loader_color = TuiColor::Rgb(110, 255, 110);
     let live_color = if flash_on {
@@ -877,7 +885,11 @@ fn draw_live_soon_screen(frame: &mut Frame, inner: TuiRect, frame_index: u64, ti
     };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
         .split(inner);
     let spinner = ['|', '/', '-', '\\'][(frame_index as usize) % 4];
     let sweep = (frame_index as usize) % 8;
@@ -923,7 +935,11 @@ fn draw_intermission_screen(
         ])
         .split(inner);
     let loop_updates = (INTERMISSION_LOOP_SECONDS * TUI_UPDATE_FPS as f32) as u64;
-    let phase_updates = if loop_updates == 0 { 0 } else { frame_index % loop_updates };
+    let phase_updates = if loop_updates == 0 {
+        0
+    } else {
+        frame_index % loop_updates
+    };
     let spinner = ['.', 'o', 'O', 'o']
         [((frame_index / INTERMISSION_SPINNER_STEP_UPDATES.max(1)) % 4) as usize];
     let phrase_phase = (phase_updates * 4) / loop_updates.max(1);
@@ -943,14 +959,22 @@ fn draw_intermission_screen(
     frame.render_widget(
         Paragraph::new(format!("{spinner} WAITING PATTERN {spinner}"))
             .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(TuiColor::Rgb(92, 180, 100)).bg(TuiColor::Black))
+            .style(
+                TuiStyle::default()
+                    .fg(TuiColor::Rgb(92, 180, 100))
+                    .bg(TuiColor::Black),
+            )
             .wrap(Wrap { trim: false }),
         rows[1],
     );
     frame.render_widget(
         Paragraph::new(phrase)
             .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(TuiColor::Rgb(215, 225, 180)).bg(TuiColor::Black))
+            .style(
+                TuiStyle::default()
+                    .fg(TuiColor::Rgb(215, 225, 180))
+                    .bg(TuiColor::Black),
+            )
             .wrap(Wrap { trim: false }),
         rows[2],
     );
@@ -970,7 +994,11 @@ fn draw_shutdown_outro_screen(
     };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Length(1), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
         .split(inner);
     let flash_on = ((app.elapsed_secs * 2.0) as u64).is_multiple_of(2);
 
@@ -1034,10 +1062,7 @@ fn draw_shutdown_outro_screen(
 }
 
 fn title_text() -> TuiText<'static> {
-    TuiText::from(vec![
-        TuiLine::from("TERMINAL"),
-        TuiLine::from("COLLECTIVE"),
-    ])
+    TuiText::from(vec![TuiLine::from("TERMINAL"), TuiLine::from("COLLECTIVE")])
 }
 
 impl TerminalScreenRenderer {
@@ -1058,7 +1083,11 @@ impl TerminalScreenRenderer {
         let screen_data = rotate_rgba_90_ccw(
             screen_width,
             screen_height,
-            &flip_rgba_rows(screen_width, screen_height, &backend.get_pixmap_data_as_rgba()),
+            &flip_rgba_rows(
+                screen_width,
+                screen_height,
+                &backend.get_pixmap_data_as_rgba(),
+            ),
         );
         let rotated_screen_width = screen_height;
         let rotated_screen_height = screen_width;
@@ -1090,9 +1119,8 @@ fn build_screen_image(width: u32, height: u32, data: Vec<u8>) -> Image {
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
-    image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING
-        | TextureUsages::COPY_DST
-        | TextureUsages::RENDER_ATTACHMENT;
+    image.texture_descriptor.usage =
+        TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
     image.sampler = ImageSampler::nearest();
     image
 }

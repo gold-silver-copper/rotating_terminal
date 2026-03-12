@@ -82,7 +82,8 @@ All exporters render numbered PNGs with `bevy_image_export`.
 
 Shared export settings:
 
-- resolution: `1920x1080`
+- internal Bevy render resolution: `3840x2160`
+- final encoded MP4 resolution: `1920x1080` by default
 - output cadence: `60 fps`
 - warmup before capture: `60` frames
 
@@ -254,10 +255,24 @@ Override the encoded playback framerate:
 FPS=30 ./scripts/render_rotation_loop.sh
 ```
 
+Override the final encoded MP4 size:
+
+```bash
+FINAL_WIDTH=1920 FINAL_HEIGHT=1080 ./scripts/render_rotation_loop.sh
+```
+
 WebP conversion options:
 
 ```bash
 WEBP_FPS=30 WEBP_SCALE_WIDTH=320 WEBP_DELAY_MS=33 WEBP_QUALITY=90 ./scripts/render_rotation_loop.sh
+```
+
+The render scripts keep Bevy's internal frame export at `3840x2160` and downscale to the final MP4 size in `ffmpeg` using Lanczos filtering.
+
+Final MP4 output size:
+
+```bash
+FINAL_WIDTH=1920 FINAL_HEIGHT=1080 ./scripts/render_rotation_loop.sh
 ```
 
 Each script:
@@ -271,7 +286,7 @@ Encoding settings:
 
 - codec: `libx264`
 - preset: `veryslow`
-- quality: `crf 12`
+- quality: `crf 10`
 - pixel format: `yuv420p`
 
 WebP defaults:
@@ -279,6 +294,11 @@ WebP defaults:
 - frame rate: `30 fps`
 - width: `320 px`
 - quality: `90`
+
+MP4 default:
+
+- final encoded size: `1920x1080`
+- source frames: rendered internally at `3840x2160` and downscaled in `ffmpeg`
 
 ## Common Commands
 
@@ -323,6 +343,7 @@ Render looping MP4s:
 - [scripts/render_zoom_in.sh](scripts/render_zoom_in.sh): zoom render helper
 - [scripts/render_intermission_loop.sh](scripts/render_intermission_loop.sh): intermission render helper
 - [scripts/render_outro_loop.sh](scripts/render_outro_loop.sh): shutdown render helper
+- [scripts/render_scene_media.sh](scripts/render_scene_media.sh): shared MP4 + WebP render helper used by the scene scripts
 - [scripts/render_all_media.sh](scripts/render_all_media.sh): batch wrapper around the four scene render helpers
 - [vintage_terminal/](vintage_terminal/): GLTF model and source textures
 - [bevy_cube_colors/](bevy_cube_colors/): separate Bevy scratch/example app in the repo
