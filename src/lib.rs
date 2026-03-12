@@ -18,7 +18,7 @@ use bevy::{
 use bevy_image_export::{ImageExport, ImageExportPlugin, ImageExportSettings, ImageExportSource};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Margin},
     prelude::Terminal,
     style::{Color as TuiColor, Style as TuiStyle},
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -28,13 +28,14 @@ use soft_ratatui::{
     embedded_graphics_unicodefonts::mono_4x6_atlas,
 };
 const TERMINAL_ASSET_PATH: &str = "vintage_terminal/scene.gltf";
-const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.18;
+const CAMERA_ORBIT_SPEED_RADIANS_PER_SECOND: f32 = 0.12;
 const CAMERA_ORBIT_RADIUS: f32 = 8.8;
-const CAMERA_HEIGHT: f32 = 4.6;
+const CAMERA_HEIGHT: f32 = 3.8;
 const CAMERA_LOOK_AT: Vec3 = Vec3::new(0.0, -0.2, 0.0);
-const ZOOM_CAMERA_START: Vec3 = Vec3::new(0.0, 4.8, 10.5);
-const ZOOM_CAMERA_END: Vec3 = Vec3::new(0.0, 1.3, 4.2);
-const ZOOM_CAMERA_LOOK_AT: Vec3 = Vec3::new(0.0, -1.05, 0.22);
+const ZOOM_CAMERA_START: Vec3 = Vec3::new(-0.35, 0.55, 8.4);
+const ZOOM_CAMERA_END: Vec3 = Vec3::new(-0.6, 0.0, 2.5);
+const ZOOM_CAMERA_LOOK_AT_START: Vec3 = Vec3::new(-0.1, -0.75, 0.35);
+const ZOOM_CAMERA_LOOK_AT_END: Vec3 = Vec3::new(-0.18, 0.5, 0.62);
 const ZOOM_DURATION_SECONDS: f32 = 28.0;
 const TERMINAL_SCENE_OFFSET: Vec3 = Vec3::new(0.0, 0.25, 0.0);
 const TERMINAL_SCALE: Vec3 = Vec3::splat(1.0);
@@ -46,12 +47,12 @@ const SCREEN_ATLAS_X: u32 = 10;
 const SCREEN_ATLAS_Y: u32 = 463;
 const SCREEN_ATLAS_WIDTH: u32 = 157;
 const SCREEN_ATLAS_HEIGHT: u32 = 233;
-const TERMINAL_BODY_COLOR: TuiColor = TuiColor::Rgb(92, 170, 92);
 const TERMINAL_BORDER_COLOR: TuiColor = TuiColor::Rgb(70, 120, 70);
-const EXPORT_WIDTH: u32 = 1024;
-const EXPORT_HEIGHT: u32 = 1024;
+const EXPORT_WIDTH: u32 = 1920;
+const EXPORT_HEIGHT: u32 = 1920;
 const EXPORT_FPS: f64 = 60.0;
-const EXPORT_FRAMES: u32 = 240;
+const EXPORT_ROTATION_FRAMES: u32 = 420;
+const EXPORT_ZOOM_FRAMES: u32 = (ZOOM_DURATION_SECONDS as u32) * EXPORT_FPS as u32;
 const EXPORT_WARMUP_FRAMES: u32 = 24;
 
 #[derive(Resource, Clone, Copy)]
@@ -130,7 +131,15 @@ pub fn run_export_rotation(output_dir: String) {
     let export_plugin = ImageExportPlugin::default();
     let export_threads = export_plugin.threads.clone();
 
-    export_app(output_dir, export_plugin).run();
+    export_app(output_dir, export_plugin, CameraMode::Orbit, EXPORT_ROTATION_FRAMES).run();
+    export_threads.finish();
+}
+
+pub fn run_export_zoom(output_dir: String) {
+    let export_plugin = ImageExportPlugin::default();
+    let export_threads = export_plugin.threads.clone();
+
+    export_app(output_dir, export_plugin, CameraMode::ZoomIn, EXPORT_ZOOM_FRAMES).run();
     export_threads.finish();
 }
 
@@ -152,13 +161,18 @@ fn app(camera_mode: CameraMode) -> App {
     app
 }
 
-fn export_app(output_dir: String, export_plugin: ImageExportPlugin) -> App {
+fn export_app(
+    output_dir: String,
+    export_plugin: ImageExportPlugin,
+    camera_mode: CameraMode,
+    frames: u32,
+) -> App {
     let mut app = App::new();
-    app.insert_resource(CameraMode::Orbit)
+    app.insert_resource(camera_mode)
         .insert_resource(Time::<Fixed>::from_hz(EXPORT_FPS))
         .insert_resource(ExportRotationConfig {
             output_dir,
-            frames: EXPORT_FRAMES,
+            frames,
             width: EXPORT_WIDTH,
             height: EXPORT_HEIGHT,
             warmup_frames: EXPORT_WARMUP_FRAMES,
@@ -275,7 +289,8 @@ fn setup(world: &mut World) {
                 Name::new("Zoom Camera"),
                 ZoomCamera { progress: 0.0 },
                 Camera3d::default(),
-                Transform::from_translation(ZOOM_CAMERA_START).looking_at(ZOOM_CAMERA_LOOK_AT, Vec3::Y),
+                Transform::from_translation(ZOOM_CAMERA_START)
+                    .looking_at(ZOOM_CAMERA_LOOK_AT_START, Vec3::Y),
             ));
         }
     }
@@ -283,6 +298,7 @@ fn setup(world: &mut World) {
 
 fn setup_export_capture(
     mut commands: Commands,
+    camera_mode: Res<CameraMode>,
     export_config: Res<ExportRotationConfig>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -330,12 +346,18 @@ fn setup_export_capture(
             ..default()
         },
         RenderTarget::Image(output_texture_handle.into()),
-        Transform::from_xyz(0.0, CAMERA_HEIGHT, CAMERA_ORBIT_RADIUS).looking_at(CAMERA_LOOK_AT, Vec3::Y),
+        match *camera_mode {
+            CameraMode::Orbit => Transform::from_xyz(0.0, CAMERA_HEIGHT, CAMERA_ORBIT_RADIUS)
+                .looking_at(CAMERA_LOOK_AT, Vec3::Y),
+            CameraMode::ZoomIn => Transform::from_translation(ZOOM_CAMERA_START)
+                .looking_at(ZOOM_CAMERA_LOOK_AT_START, Vec3::Y),
+        },
     ));
 }
 
 fn drive_export_capture(
     mut commands: Commands,
+    camera_mode: Res<CameraMode>,
     export_config: Res<ExportRotationConfig>,
     mut export_state: ResMut<ExportCaptureState>,
     mut capture_camera: Query<&mut Transform, With<ExportCaptureCamera>>,
@@ -363,14 +385,28 @@ fn drive_export_capture(
         return;
     }
 
-    let angle = export_state.current_frame as f32 / export_config.frames as f32 * TAU;
-    let capture_position = Vec3::new(
-        angle.sin() * CAMERA_ORBIT_RADIUS,
-        CAMERA_HEIGHT,
-        angle.cos() * CAMERA_ORBIT_RADIUS,
-    );
     for mut transform in &mut capture_camera {
-        *transform = Transform::from_translation(capture_position).looking_at(CAMERA_LOOK_AT, Vec3::Y);
+        *transform = match *camera_mode {
+            CameraMode::Orbit => {
+                let angle = export_state.current_frame as f32 / export_config.frames as f32 * TAU;
+                let capture_position = Vec3::new(
+                    angle.sin() * CAMERA_ORBIT_RADIUS,
+                    CAMERA_HEIGHT,
+                    angle.cos() * CAMERA_ORBIT_RADIUS,
+                );
+                Transform::from_translation(capture_position).looking_at(CAMERA_LOOK_AT, Vec3::Y)
+            }
+            CameraMode::ZoomIn => {
+                let progress = if export_config.frames <= 1 {
+                    1.0
+                } else {
+                    export_state.current_frame as f32 / (export_config.frames - 1) as f32
+                };
+                let capture_position = ZOOM_CAMERA_START.lerp(ZOOM_CAMERA_END, progress);
+                let look_at = ZOOM_CAMERA_LOOK_AT_START.lerp(ZOOM_CAMERA_LOOK_AT_END, progress);
+                Transform::from_translation(capture_position).looking_at(look_at, Vec3::Y)
+            }
+        };
     }
 
     export_state.current_frame += 1;
@@ -392,7 +428,8 @@ fn zoom_camera(time: Res<Time>, mut query: Query<(&mut Transform, &mut ZoomCamer
     for (mut transform, mut zoom) in &mut query {
         zoom.progress = (zoom.progress + time.delta_secs() / ZOOM_DURATION_SECONDS).min(1.0);
         let camera_position = ZOOM_CAMERA_START.lerp(ZOOM_CAMERA_END, zoom.progress);
-        *transform = Transform::from_translation(camera_position).looking_at(ZOOM_CAMERA_LOOK_AT, Vec3::Y);
+        let look_at = ZOOM_CAMERA_LOOK_AT_START.lerp(ZOOM_CAMERA_LOOK_AT_END, zoom.progress);
+        *transform = Transform::from_translation(camera_position).looking_at(look_at, Vec3::Y);
     }
 }
 
@@ -476,34 +513,32 @@ fn build_terminal_screen_renderer() -> TerminalScreenRenderer {
 fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp) {
     let area = frame.area();
     let frame_index = app.frame_count;
-    let pulse = (frame_index / 5).is_multiple_of(2);
-    let background = if pulse {
-        TuiColor::Rgb(5, 20, 5)
+    let flash_on = (frame_index / 8).is_multiple_of(2);
+    let background = TuiColor::Black;
+    let title_color = TuiColor::Rgb(150, 255, 150);
+    let loader_color = TuiColor::Rgb(110, 255, 110);
+    let live_color = if flash_on {
+        TuiColor::Rgb(255, 240, 170)
     } else {
-        TuiColor::Black
-    };
-    let title_color = if pulse {
-        TuiColor::Rgb(170, 255, 170)
-    } else {
-        TuiColor::Rgb(70, 220, 70)
-    };
-    let body_color = if pulse {
-        TuiColor::Rgb(110, 255, 110)
-    } else {
-        TERMINAL_BODY_COLOR
+        TuiColor::Rgb(80, 70, 30)
     };
 
+    frame.render_widget(
+        Block::new().style(TuiStyle::default().bg(background)),
+        area,
+    );
+
+    let frame_area = area.inner(Margin::new(1, 0));
     let block = Block::new()
         .borders(Borders::ALL)
         .style(TuiStyle::default().bg(background))
         .border_style(TuiStyle::default().fg(TERMINAL_BORDER_COLOR).bg(background));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = block.inner(frame_area);
+    frame.render_widget(block, frame_area);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
             Constraint::Length(2),
             Constraint::Length(1),
             Constraint::Length(2),
@@ -511,48 +546,30 @@ fn draw_terminal_screen(frame: &mut Frame, app: &mut TerminalDemoApp) {
         .split(inner);
 
     let spinner = ['|', '/', '-', '\\'][(frame_index as usize) % 4];
-    let pulse_word = if (frame_index / 8).is_multiple_of(2) {
-        "ONLINE"
-    } else {
-        "SYNCING"
-    };
-    let sweep = (frame_index as usize) % 12;
-    let status_bar: String = (0..12)
-        .map(|idx| if idx <= sweep { '█' } else { '·' })
+    let sweep = (frame_index as usize) % 8;
+    let loader_bar: String = (0..8)
+        .map(|idx| if idx == sweep { '#' } else { '-' })
         .collect();
-    let scroll_offset = (frame_index as usize) % 20;
-    let tape = ">>>LIVE>>>SIGNAL>>>";
-    let tape_line = format!(
-        "{}{}",
-        &tape[scroll_offset..],
-        &tape[..scroll_offset]
-    );
 
-    frame.render_widget(
-        Paragraph::new(format!("{spinner} {pulse_word}"))
-            .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(body_color).bg(background)),
-        rows[0],
-    );
     frame.render_widget(
         Paragraph::new("TERMINAL\nCOLLECTIVE")
             .alignment(Alignment::Center)
             .style(TuiStyle::default().fg(title_color).bg(background)),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(format!("{spinner}{loader_bar}{spinner}"))
+            .alignment(Alignment::Center)
+            .style(TuiStyle::default().fg(loader_color).bg(background))
+            .wrap(Wrap { trim: false }),
         rows[1],
     );
     frame.render_widget(
-        Paragraph::new(status_bar)
+        Paragraph::new("LIVE SOON")
             .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(body_color).bg(background))
+            .style(TuiStyle::default().fg(live_color).bg(background))
             .wrap(Wrap { trim: false }),
         rows[2],
-    );
-    frame.render_widget(
-        Paragraph::new(format!("{}\n{}", &tape_line[..12], &tape_line[4..16]))
-            .alignment(Alignment::Center)
-            .style(TuiStyle::default().fg(body_color).bg(background))
-            .wrap(Wrap { trim: false }),
-        rows[3],
     );
 }
 

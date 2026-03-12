@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRAMES_DIR="${1:-$ROOT_DIR/renders/rotation_frames}"
-OUTPUT_MP4="${2:-$ROOT_DIR/renders/rotating_terminal_loop.mp4}"
+FRAMES_DIR="${1:-$ROOT_DIR/renders/zoom_frames}"
+OUTPUT_MP4="${2:-$ROOT_DIR/renders/terminal_zoom.mp4}"
 FPS="${FPS:-60}"
 
 mkdir -p "$(dirname "$FRAMES_DIR")"
@@ -12,7 +12,7 @@ rm -rf "$FRAMES_DIR"
 
 cd "$ROOT_DIR"
 
-cargo run --release --bin export_rotation -- "$FRAMES_DIR"
+cargo run --release --bin export_zoom -- "$FRAMES_DIR"
 
 ffmpeg \
   -y \
